@@ -3026,6 +3026,10 @@ document.getElementById('input-inspect-date').valueAsDate = new Date();
 renderSidebar();
 navigate({ type: 'home' });
 
+// Load from cloud and start realtime sync
+loadFromCloud();
+initRealtime();
+
 // Keyboard shortcut: Cmd+K to toggle sidebar
 document.addEventListener('keydown', e => {
   if ((e.metaKey||e.ctrlKey) && e.key === 'k') { e.preventDefault(); toggleSidebar(); }
