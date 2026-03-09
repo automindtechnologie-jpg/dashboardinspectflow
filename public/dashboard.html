@@ -1606,8 +1606,149 @@ function loadDB() {
   return defaultDB();
 }
 
+// Debounce timer for cloud saves
+let _saveTimer = null;
+let _isSyncing = false;
+
 function saveDB() {
+  // Always save locally first (instant)
   try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
+  // Debounce cloud save (500ms)
+  clearTimeout(_saveTimer);
+  _saveTimer = setTimeout(() => saveToCloud(), 500);
+}
+
+async function saveToCloud() {
+  if (_isSyncing) return;
+  _isSyncing = true;
+  try {
+    // Strip base64 images from data to keep JSON small - images are in storage
+    const dbCopy = JSON.parse(JSON.stringify(DB));
+    // Remove large base64 data from photos (they're stored in Supabase Storage)
+    dbCopy.managers.forEach(m => {
+      m.clients.forEach(c => {
+        c.inspections.forEach(ins => {
+          ins.photos.forEach(p => {
+            if (p.image && p.image.startsWith('data:')) {
+              // Don't store base64 in cloud - it's too large
+              // Keep the storage URL if it exists
+              if (p.storageUrl) p.image = p.storageUrl;
+              else p.image = null;
+            }
+          });
+        });
+      });
+    });
+    
+    const { error } = await _supabase.from('dashboard_state').upsert({
+      id: 'main',
+      data: dbCopy,
+      updated_at: new Date().toISOString()
+    });
+    if (error) console.error('Cloud save error:', error);
+    else console.log('☁️ Synced to cloud');
+  } catch(e) {
+    console.error('Cloud save failed:', e);
+  }
+  _isSyncing = false;
+}
+
+async function loadFromCloud() {
+  try {
+    const { data, error } = await _supabase.from('dashboard_state').select('data').eq('id', 'main').single();
+    if (error && error.code !== 'PGRST116') { console.error('Cloud load error:', error); return; }
+    if (data && data.data && data.data.managers) {
+      DB = data.data;
+      // Restore storage URLs as image sources
+      DB.managers.forEach(m => {
+        m.clients.forEach(c => {
+          c.inspections.forEach(ins => {
+            ins.photos.forEach(p => {
+              if (p.storageUrl && !p.image) p.image = p.storageUrl;
+            });
+          });
+        });
+      });
+      localStorage.setItem(STORE_KEY, JSON.stringify(DB));
+      // Re-render current view
+      renderSidebar();
+      if (selManager) selManager = getManager(selManager.id);
+      if (selClient) {
+        for (const m of DB.managers) {
+          const c = m.clients.find(cl => cl.id === selClient.id);
+          if (c) { selClient = c; break; }
+        }
+      }
+      if (selInspection) {
+        const found = findInspection(selInspection.id);
+        if (found.ins) selInspection = found.ins;
+      }
+      const currentView = navHistory[navIndex];
+      if (currentView) {
+        currentView.manager = selManager;
+        currentView.client = selClient;
+        currentView.inspection = selInspection;
+        renderView(currentView);
+      } else {
+        renderView({ type: 'home' });
+      }
+      updateSidebarStats();
+      console.log('☁️ Loaded from cloud');
+    }
+  } catch(e) {
+    console.error('Cloud load failed:', e);
+  }
+}
+
+// Realtime subscription
+function initRealtime() {
+  _supabase.channel('dashboard-sync')
+    .on('postgres_changes', {
+      event: '*',
+      schema: 'public',
+      table: 'dashboard_state'
+    }, (payload) => {
+      console.log('☁️ Realtime update received');
+      if (payload.new && payload.new.data) {
+        DB = payload.new.data;
+        DB.managers.forEach(m => {
+          m.clients.forEach(c => {
+            c.inspections.forEach(ins => {
+              ins.photos.forEach(p => {
+                if (p.storageUrl && !p.image) p.image = p.storageUrl;
+              });
+            });
+          });
+        });
+        localStorage.setItem(STORE_KEY, JSON.stringify(DB));
+        renderSidebar();
+        if (selManager) selManager = getManager(selManager.id);
+        if (selClient) {
+          for (const m of DB.managers) {
+            const c = m.clients.find(cl => cl.id === selClient.id);
+            if (c) { selClient = c; break; }
+          }
+        }
+        if (selInspection) {
+          const found = findInspection(selInspection.id);
+          if (found.ins) selInspection = found.ins;
+        }
+        const currentView = navHistory[navIndex];
+        if (currentView) {
+          currentView.manager = selManager;
+          currentView.client = selClient;
+          currentView.inspection = selInspection;
+          renderView(currentView);
+        } else {
+          renderView({ type: 'home' });
+        }
+        updateSidebarStats();
+        toast('🔄 Mise à jour reçue', 'success');
+      }
+    })
+    .subscribe((status) => {
+      console.log('Realtime status:', status);
+    });
 }
 
 let DB = loadDB();
