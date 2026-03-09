@@ -506,6 +506,14 @@ input, textarea { font-family: inherit; }
   gap: 10px;
   margin-bottom: 28px;
 }
+@media (max-width: 900px) {
+  .stats-row { grid-template-columns: repeat(2, 1fr); }
+}
+@media (max-width: 480px) {
+  .stats-row { grid-template-columns: 1fr; }
+  .page-header > div:first-child { flex-direction: column; }
+  .note-panel { max-width: 100% !important; width: 100%; }
+}
 .stat-card {
   background: var(--surface);
   border: 1px solid var(--border);
