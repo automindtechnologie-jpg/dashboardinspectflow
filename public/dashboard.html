@@ -2826,7 +2826,7 @@ function renderDocRow(doc, clientId, inspId) {
 
 function _uploadDocs(files, docArray, listId, clientId, inspId) {
   if (!files || !files.length) return;
-  files.forEach(function(file) {
+  files.forEach(async function(file) {
     var ext = file.name.split('.').pop().toLowerCase();
     var doc = {
       id: uid('doc'),
@@ -2838,6 +2838,18 @@ function _uploadDocs(files, docArray, listId, clientId, inspId) {
     };
     window._docBlobs[doc.id] = file;
     docArray.push(doc);
+    
+    // Upload to Supabase Storage
+    var storagePath = 'docs/' + (clientId || inspId || 'unknown') + '/' + doc.id + '.' + ext;
+    try {
+      var result = await _supabase.storage.from('inspection-files').upload(storagePath, file, { upsert: true });
+      if (!result.error) {
+        var urlResult = _supabase.storage.from('inspection-files').getPublicUrl(storagePath);
+        doc.storageUrl = urlResult.data.publicUrl;
+        doc.storagePath = storagePath;
+      }
+    } catch(e) { console.error('Doc upload error:', e); }
+    
     saveDB();
     var list = document.getElementById(listId);
     if (list) {
@@ -2845,7 +2857,7 @@ function _uploadDocs(files, docArray, listId, clientId, inspId) {
       if (empty) empty.remove();
       list.insertAdjacentHTML('beforeend', renderDocRow(doc, clientId || '', inspId || ''));
     }
-    toast(file.name.substring(0, 26) + ' ajouté ✓', 'success');
+    toast(file.name.substring(0, 26) + ' uploadé ☁️', 'success');
   });
 }
 
