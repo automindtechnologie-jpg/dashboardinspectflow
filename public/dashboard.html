@@ -2232,8 +2232,8 @@ function renderPhotoCard(photo, inspectionId) {
           Validée
         </span>
       </div>
-      <div class="photo-upload-zone" id="upload-zone-${photo.id}" onclick="document.getElementById('fileinput-${photo.id}').click()">
-        <input type="file" accept="image/*" id="fileinput-${photo.id}" style="display:none" onchange="handleImageUpload(this,'${photo.id}','${inspectionId}')">
+      <div class="photo-upload-zone" id="upload-zone-${photo.id}">
+        <input type="file" accept="image/*" id="fileinput-${photo.id}" onchange="handleImageUpload(this,'${photo.id}','${inspectionId}')" capture="environment">
         <div class="photo-upload-placeholder" id="placeholder-${photo.id}" style="${photo.image ? 'display:none' : ''}">
           <svg viewBox="0 0 24 24" fill="none" stroke-width="1.5"><rect x="3" y="3" width="18" height="18" rx="3"/><circle cx="8.5" cy="8.5" r="1.5"/><polyline points="21 15 16 10 5 21"/></svg>
           <span>Cliquer pour uploader</span>
