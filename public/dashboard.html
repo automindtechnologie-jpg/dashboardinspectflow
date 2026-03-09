@@ -1612,9 +1612,46 @@ function loadDB() {
 let _saveTimer = null;
 let _isSyncing = false;
 
+// Strips all base64/dataUrl from a DB copy to keep it small
+function stripBinaryData(dbCopy) {
+  if (!dbCopy.managers) return dbCopy;
+  dbCopy.managers.forEach(m => {
+    m.clients.forEach(c => {
+      // Strip docs dataUrl
+      if (c.docs) c.docs.forEach(d => {
+        if (d.dataUrl && typeof d.dataUrl === 'string' && d.dataUrl.length > 200) {
+          d.dataUrl = d.storageUrl || null;
+        }
+      });
+      c.inspections.forEach(ins => {
+        // Strip photo base64
+        ins.photos.forEach(p => {
+          if (p.image && p.image.startsWith('data:')) {
+            p.image = p.storageUrl || null;
+          }
+        });
+        // Strip inspection docs dataUrl
+        if (ins.docs) ins.docs.forEach(d => {
+          if (d.dataUrl && typeof d.dataUrl === 'string' && d.dataUrl.length > 200) {
+            d.dataUrl = d.storageUrl || null;
+          }
+        });
+      });
+    });
+  });
+  return dbCopy;
+}
+
 function saveDB() {
-  // Always save locally first (instant)
-  try { localStorage.setItem(STORE_KEY, JSON.stringify(DB)); } catch(e) {}
+  // Save locally with stripped binary data to avoid localStorage quota
+  try {
+    const localCopy = stripBinaryData(JSON.parse(JSON.stringify(DB)));
+    localStorage.setItem(STORE_KEY, JSON.stringify(localCopy));
+  } catch(e) {
+    console.warn('localStorage save failed (quota):', e);
+    // Clear old data and retry
+    try { localStorage.removeItem(STORE_KEY); } catch(e2) {}
+  }
   // Debounce cloud save (500ms)
   clearTimeout(_saveTimer);
   _saveTimer = setTimeout(() => saveToCloud(), 500);
@@ -1624,23 +1661,7 @@ async function saveToCloud() {
   if (_isSyncing) return;
   _isSyncing = true;
   try {
-    // Strip base64 images from data to keep JSON small - images are in storage
-    const dbCopy = JSON.parse(JSON.stringify(DB));
-    // Remove large base64 data from photos (they're stored in Supabase Storage)
-    dbCopy.managers.forEach(m => {
-      m.clients.forEach(c => {
-        c.inspections.forEach(ins => {
-          ins.photos.forEach(p => {
-            if (p.image && p.image.startsWith('data:')) {
-              // Don't store base64 in cloud - it's too large
-              // Keep the storage URL if it exists
-              if (p.storageUrl) p.image = p.storageUrl;
-              else p.image = null;
-            }
-          });
-        });
-      });
-    });
+    const dbCopy = stripBinaryData(JSON.parse(JSON.stringify(DB)));
     
     const { error } = await _supabase.from('dashboard_state').upsert({
       id: 'main',
