@@ -664,9 +664,10 @@ input, textarea { font-family: inherit; }
   justify-content: center;
   opacity: 0;
   transition: opacity 0.18s;
+  pointer-events: none;
 }
 .photo-upload-zone:hover .photo-upload-overlay.has-photo { opacity: 1; }
-.photo-upload-overlay span { font-size: 12px; color: white; font-weight: 500; }
+.photo-upload-overlay span { font-size: 12px; color: white; font-weight: 500; pointer-events: none; }
 
 .photo-fields {
   padding: 12px;
