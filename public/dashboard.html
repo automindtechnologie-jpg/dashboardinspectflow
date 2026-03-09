@@ -2411,17 +2411,15 @@ function addPhotoSlot(inspectionId) {
   toast('Photo ajoutée', 'success');
 }
 
-/* IMAGE UPLOAD */
+/* IMAGE UPLOAD — uploads to Supabase Storage */
 function handleImageUpload(input, photoId, inspectionId) {
   const file = input.files[0];
   if (!file) return;
+  
+  // Show local preview immediately
   const reader = new FileReader();
-  reader.onload = e => {
+  reader.onload = async (e) => {
     const dataUrl = e.target.result;
-    const { mgr, cli, ins } = findInspection(inspectionId);
-    const ph = ins.photos.find(p=>p.id===photoId);
-    if (ph) ph.image = dataUrl;
-    saveDB();
     const preview = document.getElementById(`preview-${photoId}`);
     const placeholder = document.getElementById(`placeholder-${photoId}`);
     const overlay = document.querySelector(`#upload-zone-${photoId} .photo-upload-overlay`);
@@ -2430,7 +2428,51 @@ function handleImageUpload(input, photoId, inspectionId) {
     if (overlay) overlay.classList.add('has-photo');
     const dlBtn = document.getElementById('btn-dl-' + photoId);
     if (dlBtn) dlBtn.classList.remove('disabled');
-    toast('Photo uploadée ✓', 'success');
+    
+    // Upload to Supabase Storage
+    const ext = file.name.split('.').pop().toLowerCase();
+    const storagePath = `photos/${inspectionId}/${photoId}.${ext}`;
+    
+    try {
+      const { data: uploadData, error: uploadError } = await _supabase.storage
+        .from('inspection-files')
+        .upload(storagePath, file, { upsert: true });
+      
+      if (uploadError) {
+        console.error('Upload error:', uploadError);
+        // Fallback: store as base64 locally
+        const { ins } = findInspection(inspectionId);
+        const ph = ins.photos.find(p=>p.id===photoId);
+        if (ph) ph.image = dataUrl;
+        saveDB();
+        toast('Photo sauvegardée localement', 'success');
+        return;
+      }
+      
+      // Get public URL
+      const { data: urlData } = _supabase.storage
+        .from('inspection-files')
+        .getPublicUrl(storagePath);
+      
+      const publicUrl = urlData.publicUrl;
+      const { ins } = findInspection(inspectionId);
+      const ph = ins.photos.find(p=>p.id===photoId);
+      if (ph) {
+        ph.image = publicUrl;
+        ph.storageUrl = publicUrl;
+        ph.storagePath = storagePath;
+      }
+      if (preview) preview.src = publicUrl;
+      saveDB();
+      toast('Photo uploadée ☁️', 'success');
+    } catch(err) {
+      console.error('Upload failed:', err);
+      const { ins } = findInspection(inspectionId);
+      const ph = ins.photos.find(p=>p.id===photoId);
+      if (ph) ph.image = dataUrl;
+      saveDB();
+      toast('Photo sauvegardée localement', 'success');
+    }
   };
   reader.readAsDataURL(file);
 }
