@@ -2475,6 +2475,8 @@ function handleImageUpload(input, photoId, inspectionId) {
     }
   };
   reader.readAsDataURL(file);
+  // Reset input so same file can be re-selected
+  input.value = '';
 }
 
 /* CLEAR PHOTO IMAGE (keep slot, remove image) */
