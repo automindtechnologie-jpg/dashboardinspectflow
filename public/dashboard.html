@@ -1441,7 +1441,24 @@ input, textarea { font-family: inherit; }
 
 <script>
 /* ═══════════════════════════════════════════════════════
-   DATABASE (localStorage)
+   API CLIENT — toutes les écritures passent par le serveur
+   (élimine les race conditions du blob JSONB mono-ligne)
+═══════════════════════════════════════════════════════ */
+const API_URL = ''; // même origine que le serveur Express
+
+async function apiCall(method, path, body) {
+  const opts = { method, headers: { 'Content-Type': 'application/json' } };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch(API_URL + path, opts);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(text || `HTTP ${res.status}`);
+  }
+  return res.json();
+}
+
+/* ═══════════════════════════════════════════════════════
+   DATABASE (cache localStorage — chaque action a son propre appel API)
 ═══════════════════════════════════════════════════════ */
 const STORE_KEY = 'inspectflow_db_v3';
 
@@ -1608,10 +1625,6 @@ function loadDB() {
   return defaultDB();
 }
 
-// Debounce timer for cloud saves
-let _saveTimer = null;
-let _isSyncing = false;
-
 // Strips all base64/dataUrl from a DB copy to keep it small
 function stripBinaryData(dbCopy) {
   if (!dbCopy.managers) return dbCopy;
@@ -1642,47 +1655,23 @@ function stripBinaryData(dbCopy) {
   return dbCopy;
 }
 
+// Sauvegarde uniquement dans localStorage — chaque action a son propre appel API
 function saveDB() {
-  // Save locally with stripped binary data to avoid localStorage quota
   try {
     const localCopy = stripBinaryData(JSON.parse(JSON.stringify(DB)));
     localStorage.setItem(STORE_KEY, JSON.stringify(localCopy));
   } catch(e) {
     console.warn('localStorage save failed (quota):', e);
-    // Clear old data and retry
     try { localStorage.removeItem(STORE_KEY); } catch(e2) {}
   }
-  // Debounce cloud save (500ms)
-  clearTimeout(_saveTimer);
-  _saveTimer = setTimeout(() => saveToCloud(), 500);
 }
 
-async function saveToCloud() {
-  if (_isSyncing) return;
-  _isSyncing = true;
-  try {
-    const dbCopy = stripBinaryData(JSON.parse(JSON.stringify(DB)));
-    
-    const { error } = await _supabase.from('dashboard_state').upsert({
-      id: 'main',
-      data: dbCopy,
-      updated_at: new Date().toISOString()
-    });
-    if (error) console.error('Cloud save error:', error);
-    else console.log('☁️ Synced to cloud');
-  } catch(e) {
-    console.error('Cloud save failed:', e);
-  }
-  _isSyncing = false;
-}
-
+// Charge l'arbre complet depuis l'API (remplace le blob JSONB)
 async function loadFromCloud() {
   try {
-    const { data, error } = await _supabase.from('dashboard_state').select('data').eq('id', 'main').single();
-    if (error && error.code !== 'PGRST116') { console.error('Cloud load error:', error); return; }
-    if (data && data.data && data.data.managers) {
-      DB = data.data;
-      // Restore storage URLs as image sources
+    const data = await apiCall('GET', '/api/data');
+    if (data && Array.isArray(data.managers)) {
+      DB = data;
       DB.managers.forEach(m => {
         m.clients.forEach(c => {
           c.inspections.forEach(ins => {
@@ -1693,7 +1682,6 @@ async function loadFromCloud() {
         });
       });
       localStorage.setItem(STORE_KEY, JSON.stringify(DB));
-      // Re-render current view
       renderSidebar();
       if (selManager) selManager = getManager(selManager.id);
       if (selClient) {
@@ -1716,62 +1704,12 @@ async function loadFromCloud() {
         renderView({ type: 'home' });
       }
       updateSidebarStats();
-      console.log('☁️ Loaded from cloud');
+      console.log('☁️ Loaded from API');
     }
   } catch(e) {
     console.error('Cloud load failed:', e);
+    toast('Serveur inaccessible — mode hors-ligne', 'error');
   }
-}
-
-// Realtime subscription
-function initRealtime() {
-  _supabase.channel('dashboard-sync')
-    .on('postgres_changes', {
-      event: '*',
-      schema: 'public',
-      table: 'dashboard_state'
-    }, (payload) => {
-      console.log('☁️ Realtime update received');
-      if (payload.new && payload.new.data) {
-        DB = payload.new.data;
-        DB.managers.forEach(m => {
-          m.clients.forEach(c => {
-            c.inspections.forEach(ins => {
-              ins.photos.forEach(p => {
-                if (p.storageUrl && !p.image) p.image = p.storageUrl;
-              });
-            });
-          });
-        });
-        localStorage.setItem(STORE_KEY, JSON.stringify(DB));
-        renderSidebar();
-        if (selManager) selManager = getManager(selManager.id);
-        if (selClient) {
-          for (const m of DB.managers) {
-            const c = m.clients.find(cl => cl.id === selClient.id);
-            if (c) { selClient = c; break; }
-          }
-        }
-        if (selInspection) {
-          const found = findInspection(selInspection.id);
-          if (found.ins) selInspection = found.ins;
-        }
-        const currentView = navHistory[navIndex];
-        if (currentView) {
-          currentView.manager = selManager;
-          currentView.client = selClient;
-          currentView.inspection = selInspection;
-          renderView(currentView);
-        } else {
-          renderView({ type: 'home' });
-        }
-        updateSidebarStats();
-        toast('🔄 Mise à jour reçue', 'success');
-      }
-    })
-    .subscribe((status) => {
-      console.log('Realtime status:', status);
-    });
 }
 
 let DB = loadDB();
@@ -2350,7 +2288,7 @@ function toggleSidebar() {
 }
 
 /* ADD MANAGER */
-function addManager() {
+async function addManager() {
   const name = document.getElementById('input-manager-name').value.trim();
   const email = document.getElementById('input-manager-email').value.trim();
   const phone = document.getElementById('input-manager-phone').value.trim();
@@ -2360,19 +2298,24 @@ function addManager() {
     color: AVATAR_COLORS[DB.managers.length % AVATAR_COLORS.length],
     clients: []
   };
-  DB.managers.push(newMgr);
-  saveDB();
-  closeModal('modal-add-manager');
-  document.getElementById('input-manager-name').value = '';
-  document.getElementById('input-manager-email').value = '';
-  document.getElementById('input-manager-phone').value = '';
-  renderSidebar();
-  if (!selManager) renderView({ type: 'home' });
-  toast(`Manager ${name} ajouté`, 'success');
+  try {
+    await apiCall('POST', '/api/managers', { id: newMgr.id, name, email, phone, color: newMgr.color });
+    DB.managers.push(newMgr);
+    saveDB();
+    closeModal('modal-add-manager');
+    document.getElementById('input-manager-name').value = '';
+    document.getElementById('input-manager-email').value = '';
+    document.getElementById('input-manager-phone').value = '';
+    renderSidebar();
+    if (!selManager) renderView({ type: 'home' });
+    toast(`Manager ${name} ajouté`, 'success');
+  } catch(e) {
+    toast('Erreur : ' + e.message, 'error');
+  }
 }
 
 /* ADD CLIENT */
-function addClient() {
+async function addClient() {
   const name = document.getElementById('input-client-name').value.trim();
   const email = document.getElementById('input-client-email').value.trim();
   const type = document.getElementById('input-client-type').value.trim();
@@ -2380,58 +2323,71 @@ function addClient() {
   if (!name) { toast('Veuillez saisir un nom', 'error'); return; }
   if (!selManager) return;
   const client = { id: uid('cli'), name, email, type, phone, urgent: false, notes: '', docs: [], inspections: [] };
-  const mgr = getManager(selManager.id);
-  mgr.clients.push(client);
-  selManager = mgr;
-  saveDB();
-  closeModal('modal-add-client');
-  document.getElementById('input-client-name').value = '';
-  document.getElementById('input-client-email').value = '';
-  document.getElementById('input-client-type').value = '';
-  const ph = document.getElementById('input-client-phone'); if(ph) ph.value = '';
-  renderView({ type: 'manager', manager: selManager });
-  toast(`Client ${name} créé`, 'success');
+  try {
+    await apiCall('POST', '/api/clients', { id: client.id, manager_id: selManager.id, name, email, type, phone });
+    const mgr = getManager(selManager.id);
+    mgr.clients.push(client);
+    selManager = mgr;
+    saveDB();
+    closeModal('modal-add-client');
+    document.getElementById('input-client-name').value = '';
+    document.getElementById('input-client-email').value = '';
+    document.getElementById('input-client-type').value = '';
+    const ph = document.getElementById('input-client-phone'); if(ph) ph.value = '';
+    renderView({ type: 'manager', manager: selManager });
+    toast(`Client ${name} créé`, 'success');
+  } catch(e) {
+    toast('Erreur : ' + e.message, 'error');
+  }
 }
 
 /* ADD INSPECTION */
-function addInspection() {
+async function addInspection() {
   const date = document.getElementById('input-inspect-date').value;
   const notes = document.getElementById('input-inspect-notes').value.trim();
   if (!date) { toast('Veuillez sélectionner une date', 'error'); return; }
   if (!selClient) return;
   const insp = { id: uid('ins'), date, notes, status: 'draft', urgent: false, inspNotes: '', docs: [], photos: [] };
-  const mgr = getManager(selManager.id);
-  const cli = mgr.clients.find(c=>c.id===selClient.id);
-  cli.inspections.push(insp);
-  selClient = cli;
-  selManager = mgr;
-  saveDB();
-  closeModal('modal-add-inspection');
-  document.getElementById('input-inspect-date').value = '';
-  document.getElementById('input-inspect-notes').value = '';
-  renderView({ type: 'client', client: selClient });
-  toast('Inspection créée', 'success');
+  try {
+    await apiCall('POST', '/api/inspections', { id: insp.id, client_id: selClient.id, date, notes });
+    const mgr = getManager(selManager.id);
+    const cli = mgr.clients.find(c=>c.id===selClient.id);
+    cli.inspections.push(insp);
+    selClient = cli;
+    selManager = mgr;
+    saveDB();
+    closeModal('modal-add-inspection');
+    document.getElementById('input-inspect-date').value = '';
+    document.getElementById('input-inspect-notes').value = '';
+    renderView({ type: 'client', client: selClient });
+    toast('Inspection créée', 'success');
+  } catch(e) {
+    toast('Erreur : ' + e.message, 'error');
+  }
 }
 
 /* ADD PHOTO SLOT */
-function addPhotoSlot(inspectionId) {
-  const { mgr, cli, ins } = findInspection(inspectionId);
+async function addPhotoSlot(inspectionId) {
+  const { ins } = findInspection(inspectionId);
   const nextIdx = ins.photos.length + 1;
   const photo = { id: uid('ph'), index: nextIdx, lieu:'', probleme:'', solution:'', validated:false, image:null };
-  ins.photos.push(photo);
-  saveDB();
-  selInspection = ins;
-  // Re-render photos grid only
-  const grid = document.getElementById(`photos-grid-${inspectionId}`);
-  if (grid) {
-    // Remove add button, append new card, re-append add button
-    const addBtn = grid.querySelector('.btn-add-photo');
-    const newCard = document.createElement('div');
-    newCard.innerHTML = renderPhotoCard(photo, inspectionId);
-    grid.insertBefore(newCard.firstElementChild, addBtn);
-    updateProgressBar(inspectionId);
+  try {
+    await apiCall('POST', '/api/photos', { id: photo.id, inspection_id: inspectionId, sort_order: nextIdx });
+    ins.photos.push(photo);
+    saveDB();
+    selInspection = ins;
+    const grid = document.getElementById(`photos-grid-${inspectionId}`);
+    if (grid) {
+      const addBtn = grid.querySelector('.btn-add-photo');
+      const newCard = document.createElement('div');
+      newCard.innerHTML = renderPhotoCard(photo, inspectionId);
+      grid.insertBefore(newCard.firstElementChild, addBtn);
+      updateProgressBar(inspectionId);
+    }
+    toast('Photo ajoutée', 'success');
+  } catch(e) {
+    toast('Erreur : ' + e.message, 'error');
   }
-  toast('Photo ajoutée', 'success');
 }
 
 /* Compress image to WebP before upload */
@@ -2492,7 +2448,7 @@ function handleImageUpload(input, photoId, inspectionId) {
       const { data: urlData } = _supabase.storage
         .from('inspection-files')
         .getPublicUrl(storagePath);
-      
+
       const publicUrl = urlData.publicUrl;
       const { ins } = findInspection(inspectionId);
       const ph = ins.photos.find(p=>p.id===photoId);
@@ -2502,6 +2458,8 @@ function handleImageUpload(input, photoId, inspectionId) {
         ph.storagePath = storagePath;
       }
       if (preview) preview.src = publicUrl;
+      // Persist storage URL in DB (ciblé, sans écraser tout le blob)
+      await apiCall('PATCH', `/api/photos/${photoId}`, { image: publicUrl, storagePath });
       saveDB();
       const savedKB = Math.round((file.size - webpBlob.size) / 1024);
       toast(`Photo compressée & uploadée ☁️ (-${savedKB > 0 ? savedKB : 0} Ko)`, 'success');
@@ -2520,11 +2478,16 @@ function handleImageUpload(input, photoId, inspectionId) {
 }
 
 /* CLEAR PHOTO IMAGE (keep slot, remove image) */
-function clearPhotoImage(photoId, inspectionId) {
+async function clearPhotoImage(photoId, inspectionId) {
   const { ins } = findInspection(inspectionId);
   const ph = ins.photos.find(p => p.id === photoId);
   if (!ph || !ph.image) return;
+  try {
+    await apiCall('PATCH', `/api/photos/${photoId}`, { image: null, storagePath: null });
+  } catch(e) { console.error('clearPhotoImage API error:', e); }
   ph.image = null;
+  ph.storageUrl = null;
+  ph.storagePath = null;
   saveDB();
   const preview = document.getElementById('preview-' + photoId);
   const placeholder = document.getElementById('placeholder-' + photoId);
@@ -2538,19 +2501,30 @@ function clearPhotoImage(photoId, inspectionId) {
   if (clrBtn) clrBtn.classList.add('disabled');
   toast('Image effacée', 'success');
 }
+/* Timers de debounce pour les champs texte des photos */
+const _photoFieldTimers = {};
+
 function updatePhotoField(photoId, inspectionId, field, value) {
   const { ins } = findInspection(inspectionId);
   const ph = ins.photos.find(p=>p.id===photoId);
   if (ph) ph[field] = value;
   saveDB();
+  // Debounce l'appel API à 800ms pour éviter de spammer sur chaque touche
+  clearTimeout(_photoFieldTimers[photoId]);
+  _photoFieldTimers[photoId] = setTimeout(async () => {
+    try { await apiCall('PATCH', `/api/photos/${photoId}`, { [field]: value }); }
+    catch(e) { console.error('updatePhotoField API error:', e); }
+  }, 800);
 }
 
 /* TOGGLE VALIDATE */
-function toggleValidate(photoId, inspectionId) {
+async function toggleValidate(photoId, inspectionId) {
   const { ins } = findInspection(inspectionId);
   const ph = ins.photos.find(p=>p.id===photoId);
   if (!ph) return;
   ph.validated = !ph.validated;
+  try { await apiCall('PATCH', `/api/photos/${photoId}`, { validated: ph.validated }); }
+  catch(e) { ph.validated = !ph.validated; toast('Erreur : ' + e.message, 'error'); return; }
   saveDB();
   const card = document.getElementById(`photo-card-${photoId}`);
   const btn = document.getElementById(`btn-val-${photoId}`);
@@ -2577,9 +2551,12 @@ function updateProgressBar(inspectionId) {
 }
 
 /* SET STATUS */
-function setInspectionStatus(inspectionId, status) {
-  const { mgr, cli, ins } = findInspection(inspectionId);
+async function setInspectionStatus(inspectionId, status) {
+  const { ins } = findInspection(inspectionId);
+  const prev = ins.status;
   ins.status = status;
+  try { await apiCall('PATCH', `/api/inspections/${inspectionId}`, { status }); }
+  catch(e) { ins.status = prev; toast('Erreur : ' + e.message, 'error'); return; }
   saveDB();
   selInspection = ins;
   renderView({ type: 'inspection', inspection: ins });
@@ -2589,18 +2566,18 @@ function setInspectionStatus(inspectionId, status) {
 }
 
 /* SUBMIT RAPPORT */
-function submitRapport(inspectionId) {
+async function submitRapport(inspectionId) {
   const { ins } = findInspection(inspectionId);
+  const prev = ins.status;
   ins.status = 'rouge';
+  try { await apiCall('PATCH', `/api/inspections/${inspectionId}`, { status: 'rouge' }); }
+  catch(e) { ins.status = prev; toast('Erreur : ' + e.message, 'error'); return; }
   saveDB();
   selInspection = ins;
   renderView({ type: 'inspection', inspection: ins });
   renderSidebar();
   updateSidebarStats();
-  // Simulate webhook call
   toast('Rapport soumis — Admin notifiée 🔔', 'success');
-  // In production: call webhook
-  // fetch('/webhook/inspectflow/rapport-submit', { method:'POST', body: JSON.stringify({inspection_id: inspectionId, ...}) })
 }
 
 /* STATUS CHANGE (quick buttons) */
@@ -2613,9 +2590,23 @@ function confirmDelete(type, id, name) {
   openModal('modal-delete-confirm');
 }
 
-function executeDelete() {
+async function executeDelete() {
   if (!pendingDelete) return;
   const { type, id } = pendingDelete;
+
+  /* Endpoint API selon le type */
+  const endpointMap = { manager:'managers', client:'clients', inspection:'inspections', photo:'photos' };
+  const endpoint = endpointMap[type];
+  if (!endpoint) return;
+
+  try {
+    await apiCall('DELETE', `/api/${endpoint}/${id}`);
+  } catch(e) {
+    toast('Erreur suppression : ' + e.message, 'error');
+    closeModal('modal-delete-confirm');
+    return;
+  }
+
   if (type === 'manager') {
     DB.managers = DB.managers.filter(m=>m.id!==id);
     if (selManager && selManager.id === id) goHome();
@@ -2642,7 +2633,7 @@ function executeDelete() {
     } else renderView({ type: 'client', client: selClient });
   } else if (type === 'photo') {
     if (!selInspection) return;
-    const { mgr, cli, ins } = findInspection(selInspection.id);
+    const { ins } = findInspection(selInspection.id);
     ins.photos = ins.photos.filter(p=>p.id!==id);
     ins.photos.forEach((p,i) => p.index = i+1);
     selInspection = ins;
@@ -2876,22 +2867,41 @@ function _uploadDocs(files, docArray, listId, clientId, inspId) {
       size: fmtSize(file.size),
       type: ext,
       status: 'none',
-      uploadedAt: new Date().toISOString().slice(0, 10)
+      uploadedAt: new Date().toISOString().slice(0, 10),
+      storageUrl: null,
+      storagePath: null,
     };
     window._docBlobs[doc.id] = file;
-    docArray.push(doc);
-    
-    // Upload to Supabase Storage
+
+    // Upload fichier vers Supabase Storage
     var storagePath = 'docs/' + (clientId || inspId || 'unknown') + '/' + doc.id + '.' + ext;
+    var storageUrl = null;
     try {
       var result = await _supabase.storage.from('inspection-files').upload(storagePath, file, { upsert: true });
       if (!result.error) {
         var urlResult = _supabase.storage.from('inspection-files').getPublicUrl(storagePath);
-        doc.storageUrl = urlResult.data.publicUrl;
+        storageUrl = urlResult.data.publicUrl;
+        doc.storageUrl = storageUrl;
         doc.storagePath = storagePath;
       }
-    } catch(e) { console.error('Doc upload error:', e); }
-    
+    } catch(e) { console.error('Doc storage upload error:', e); }
+
+    // Persiste les métadonnées en base (opération ciblée, sans race condition)
+    try {
+      await apiCall('POST', '/api/documents', {
+        id: doc.id,
+        client_id: clientId || null,
+        inspection_id: inspId || null,
+        name: doc.name,
+        file_size: doc.size,
+        file_ext: ext,
+        status: 'none',
+        storage_path: storagePath,
+        storage_url: storageUrl,
+      });
+    } catch(e) { console.error('Doc DB save error:', e); }
+
+    docArray.push(doc);
     saveDB();
     var list = document.getElementById(listId);
     if (list) {
@@ -2921,11 +2931,13 @@ function handleInspDocUpload(input, inspId) {
   input.value = '';
 }
 
-function cycleDocStatus(docId, clientId, inspId) {
+async function cycleDocStatus(docId, clientId, inspId) {
   var doc = _findDoc(docId, clientId, inspId);
   if (!doc) return;
   var cycle = { none: 'pending', pending: 'approved', approved: 'none' };
   doc.status = cycle[doc.status] || 'none';
+  try { await apiCall('PATCH', `/api/documents/${docId}`, { status: doc.status }); }
+  catch(e) { console.error('cycleDocStatus API error:', e); }
   saveDB();
   var row = document.getElementById('doc-row-' + docId);
   if (row) row.outerHTML = renderDocRow(doc, clientId || '', inspId || '');
@@ -2946,9 +2958,11 @@ function downloadDoc(docId, clientId, inspId) {
   toast('Téléchargement : ' + doc.name.substring(0, 26), 'success');
 }
 
-function deleteDoc(docId, clientId, inspId) {
+async function deleteDoc(docId, clientId, inspId) {
   var arr = _getDocArray(clientId, inspId);
   if (!arr) return;
+  try { await apiCall('DELETE', `/api/documents/${docId}`); }
+  catch(e) { toast('Erreur suppression : ' + e.message, 'error'); return; }
   var row = document.getElementById('doc-row-' + docId);
   if (row) row.remove();
   arr.docs = arr.docs.filter(function(d) { return d.id !== docId; });
@@ -2980,29 +2994,44 @@ function _getDocArray(clientId, inspId) {
 /* ═══════════════════════════════════════════════════════
    NOTES — SAVE
 ═══════════════════════════════════════════════════════ */
-function saveMgrNote(managerId) {
+async function saveMgrNote(managerId) {
   const ta = document.getElementById('mgr-note-' + managerId);
   if (!ta) return;
   const mgr = getManager(managerId);
-  if (mgr) { mgr.notes = ta.value; saveDB(); }
+  if (mgr) {
+    mgr.notes = ta.value;
+    saveDB();
+    try { await apiCall('PATCH', `/api/managers/${managerId}`, { notes: ta.value }); }
+    catch(e) { console.error('saveMgrNote API error:', e); }
+  }
   const btn = document.getElementById('mgr-note-save-' + managerId);
   if (btn) btn.classList.remove('visible');
   toast('Note sauvegardée', 'success');
 }
-function saveClientNote(clientId) {
+async function saveClientNote(clientId) {
   const ta = document.getElementById('cli-note-' + clientId);
   if (!ta) return;
   const { cli } = findClient(clientId);
-  if (cli) { cli.notes = ta.value; saveDB(); }
+  if (cli) {
+    cli.notes = ta.value;
+    saveDB();
+    try { await apiCall('PATCH', `/api/clients/${clientId}`, { notes: ta.value }); }
+    catch(e) { console.error('saveClientNote API error:', e); }
+  }
   const btn = document.getElementById('cli-note-save-' + clientId);
   if (btn) btn.classList.remove('visible');
   toast('Note sauvegardée', 'success');
 }
-function saveInspNote(inspectionId) {
+async function saveInspNote(inspectionId) {
   const ta = document.getElementById('ins-note-' + inspectionId);
   if (!ta) return;
   const { ins } = findInspection(inspectionId);
-  if (ins) { ins.inspNotes = ta.value; saveDB(); }
+  if (ins) {
+    ins.inspNotes = ta.value;
+    saveDB();
+    try { await apiCall('PATCH', `/api/inspections/${inspectionId}`, { inspNotes: ta.value }); }
+    catch(e) { console.error('saveInspNote API error:', e); }
+  }
   const btn = document.getElementById('ins-note-save-' + inspectionId);
   if (btn) btn.classList.remove('visible');
   toast('Note sauvegardée', 'success');
@@ -3011,14 +3040,24 @@ function saveInspNote(inspectionId) {
 /* ═══════════════════════════════════════════════════════
    CLIENT FIELD + URGENCY
 ═══════════════════════════════════════════════════════ */
+/* Timers de debounce pour les champs client (email, téléphone) */
+const _clientFieldTimers = {};
+
 function updateClientField(clientId, field, value) {
   const { cli } = findClient(clientId);
   if (cli) { cli[field] = value; saveDB(); }
+  clearTimeout(_clientFieldTimers[clientId + field]);
+  _clientFieldTimers[clientId + field] = setTimeout(async () => {
+    try { await apiCall('PATCH', `/api/clients/${clientId}`, { [field]: value }); }
+    catch(e) { console.error('updateClientField API error:', e); }
+  }, 800);
 }
-function toggleClientUrgent(clientId) {
+async function toggleClientUrgent(clientId) {
   const { mgr, cli } = findClient(clientId);
   if (!cli) return;
   cli.urgent = !cli.urgent;
+  try { await apiCall('PATCH', `/api/clients/${clientId}`, { urgent: cli.urgent }); }
+  catch(e) { cli.urgent = !cli.urgent; toast('Erreur : ' + e.message, 'error'); return; }
   saveDB();
   selClient = cli;
   if (mgr) selManager = mgr;
@@ -3026,18 +3065,22 @@ function toggleClientUrgent(clientId) {
   renderSidebar();
   toast(cli.urgent ? '🔴 Marqué Urgent' : 'Urgence retirée', cli.urgent ? 'error' : 'success');
 }
-function toggleInspectionUrgent(inspectionId) {
+async function toggleInspectionUrgent(inspectionId) {
   const { ins } = findInspection(inspectionId);
   if (!ins) return;
   ins.urgent = !ins.urgent;
+  try { await apiCall('PATCH', `/api/inspections/${inspectionId}`, { urgent: ins.urgent }); }
+  catch(e) { ins.urgent = !ins.urgent; toast('Erreur : ' + e.message, 'error'); return; }
   saveDB();
   renderView({ type: 'client', client: selClient });
   toast(ins.urgent ? '🔴 Inspection Urgente' : 'Urgence retirée', ins.urgent ? 'error' : 'success');
 }
-function toggleInspectionUrgentDirect(inspectionId) {
+async function toggleInspectionUrgentDirect(inspectionId) {
   const { ins } = findInspection(inspectionId);
   if (!ins) return;
   ins.urgent = !ins.urgent;
+  try { await apiCall('PATCH', `/api/inspections/${inspectionId}`, { urgent: ins.urgent }); }
+  catch(e) { ins.urgent = !ins.urgent; toast('Erreur : ' + e.message, 'error'); return; }
   saveDB();
   selInspection = ins;
   renderView({ type: 'inspection', inspection: ins });
@@ -3080,9 +3123,8 @@ document.getElementById('input-inspect-date').valueAsDate = new Date();
 renderSidebar();
 navigate({ type: 'home' });
 
-// Load from cloud and start realtime sync
+// Charge les données depuis l'API Express
 loadFromCloud();
-initRealtime();
 
 // Keyboard shortcut: Cmd+K to toggle sidebar
 document.addEventListener('keydown', e => {
