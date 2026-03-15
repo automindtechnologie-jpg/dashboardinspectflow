@@ -17,4 +17,7 @@ jobs:
           script: |
             cd ${{ secrets.VPS_PATH }}
             git pull origin main
+            cd /root
+            docker compose build inspectflow
+            docker compose up -d --force-recreate inspectflow
             echo "Deploy done: $(date)"
