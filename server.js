@@ -67,6 +67,9 @@ function sendError(res, e, code = 500) {
   res.status(code).json({ error: msg });
 }
 
+/* ── Redirect / → /dashboard.html ──────────────────────────────────── */
+app.get('/', (_req, res) => res.redirect('/dashboard.html'));
+
 /* ── GET /api/data ──────────────────────────────────────────────────── */
 app.get('/api/data', async (_req, res) => {
   try {
