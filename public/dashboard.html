@@ -1308,6 +1308,9 @@ input, textarea { font-family: inherit; }
       <div class="sidebar-status-row">
         <span>🟢 Envoyés</span><span id="stat-vert">0</span>
       </div>
+      <div class="sidebar-status-row">
+        <span>🚨 Urgences</span><span id="stat-urgent">0</span>
+      </div>
     </div>
   </aside>
 
@@ -1889,6 +1892,7 @@ function renderHome(el) {
   const totalRed = countStatus('rouge');
   const totalAmber = countStatus('jaune');
   const totalGreen = countStatus('vert');
+  const totalUrgent = countUrgent();
 
   el.innerHTML = `
     <div class="page-header">
@@ -1915,6 +1919,11 @@ function renderHome(el) {
         <div class="stat-label">Envoyés</div>
         <div class="stat-value" style="color:var(--green)">${totalGreen}</div>
         <div class="stat-sub">ce mois</div>
+      </div>
+      <div class="stat-card">
+        <div class="stat-label">🚨 Urgences</div>
+        <div class="stat-value" style="color:var(--red)">${totalUrgent}</div>
+        <div class="stat-sub">à traiter</div>
       </div>
     </div>
     <div class="section-divider">Managers</div>
@@ -1959,9 +1968,10 @@ function renderManagerCard(m) {
 function renderManagerHome(el, manager) {
   if (!manager) return;
   const allInspections = manager.clients.flatMap(c => c.inspections);
-  const rouge = allInspections.filter(i=>i.status==='rouge').length;
-  const jaune = allInspections.filter(i=>i.status==='jaune').length;
-  const vert  = allInspections.filter(i=>i.status==='vert').length;
+  const rouge  = allInspections.filter(i=>i.status==='rouge').length;
+  const jaune  = allInspections.filter(i=>i.status==='jaune').length;
+  const vert   = allInspections.filter(i=>i.status==='vert').length;
+  const urgent = allInspections.filter(i=>i.urgent).length;
 
   el.innerHTML = `
     <div class="page-header">
@@ -2001,6 +2011,7 @@ function renderManagerHome(el, manager) {
       <div class="stat-card"><div class="stat-label">🔴 En attente</div><div class="stat-value" style="color:var(--red)">${rouge}</div></div>
       <div class="stat-card"><div class="stat-label">🟡 Validation</div><div class="stat-value" style="color:var(--amber)">${jaune}</div></div>
       <div class="stat-card"><div class="stat-label">🟢 Envoyés</div><div class="stat-value" style="color:var(--green)">${vert}</div></div>
+      <div class="stat-card"><div class="stat-label">🚨 Urgences</div><div class="stat-value" style="color:var(--red)">${urgent}</div></div>
     </div>
 
     <div class="section-divider">Clients</div>
@@ -2052,7 +2063,7 @@ function renderClientView(el, client) {
         <div style="flex:1;min-width:220px">
           <div style="display:flex;align-items:center;gap:10px;margin-bottom:6px">
             <div class="page-title">${esc(client.name)}</div>
-            ${client.urgent ? '<span class="urgent-badge">🔴 URGENT</span>' : ''}
+            ${client.urgent ? '<span class="urgent-badge">🔴 Urgent</span>' : ''}
           </div>
           <div class="page-sub">${esc(client.type||'')} · ${client.inspections.length} inspection${client.inspections.length!==1?'s':''}</div>
           <div class="client-info-row" style="margin-top:12px">
@@ -2866,6 +2877,7 @@ function updateSidebarStats() {
   document.getElementById('stat-rouge').textContent = countStatus('rouge');
   document.getElementById('stat-jaune').textContent = countStatus('jaune');
   document.getElementById('stat-vert').textContent = countStatus('vert');
+  document.getElementById('stat-urgent').textContent = countUrgent();
 }
 
 function updateTopbarActions(actions) {
@@ -2955,6 +2967,10 @@ function statusLabel(status) {
 
 function countStatus(status) {
   return DB.managers.flatMap(m => m.clients.flatMap(c => c.inspections)).filter(i => i.status === status).length;
+}
+
+function countUrgent() {
+  return DB.managers.flatMap(m => m.clients.flatMap(c => c.inspections)).filter(i => i.urgent).length;
 }
 
 function getManager(id) { return DB.managers.find(m=>m.id===id); }
