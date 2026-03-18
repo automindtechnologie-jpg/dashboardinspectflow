@@ -1422,6 +1422,90 @@ input, textarea { font-family: inherit; }
   </div>
 </div>
 
+<div class="modal-backdrop" id="modal-edit-manager" onclick="closeModal('modal-edit-manager')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-icon modal-icon-add">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    </div>
+    <div class="modal-title">Modifier le Manager</div>
+    <div class="modal-sub">Mettez à jour les informations du manager.</div>
+    <div class="modal-form">
+      <div class="modal-field">
+        <label>Nom complet</label>
+        <input class="modal-input" id="edit-manager-name" placeholder="Ex: Jean-Marie Dupont" />
+      </div>
+      <div class="modal-field">
+        <label>Email</label>
+        <input class="modal-input" id="edit-manager-email" type="email" placeholder="jean@company.mu" />
+      </div>
+      <div class="modal-field">
+        <label>WhatsApp</label>
+        <input class="modal-input" id="edit-manager-phone" placeholder="+230 5XXX XXXX" />
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-modal-cancel animated" onclick="closeModal('modal-edit-manager')">Annuler</button>
+      <button class="btn-modal-confirm primary animated" onclick="saveEditManager()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-edit-client" onclick="closeModal('modal-edit-client')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-icon modal-icon-add">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    </div>
+    <div class="modal-title">Modifier le Client</div>
+    <div class="modal-sub">Mettez à jour les informations du client.</div>
+    <div class="modal-form">
+      <div class="modal-field">
+        <label>Nom du client</label>
+        <input class="modal-input" id="edit-client-name" placeholder="Ex: Hotel Palmier" />
+      </div>
+      <div class="modal-field">
+        <label>Email client</label>
+        <input class="modal-input" id="edit-client-email" type="email" placeholder="gm@hotelpalmier.mu" />
+      </div>
+      <div class="modal-field">
+        <label>Type</label>
+        <input class="modal-input" id="edit-client-type" placeholder="Ex: Hotel, Villa, Restaurant..." />
+      </div>
+      <div class="modal-field">
+        <label>Téléphone client</label>
+        <input class="modal-input" id="edit-client-phone" type="tel" placeholder="+230 5XXX XXXX" />
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-modal-cancel animated" onclick="closeModal('modal-edit-client')">Annuler</button>
+      <button class="btn-modal-confirm primary animated" onclick="saveEditClient()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal-backdrop" id="modal-edit-inspection" onclick="closeModal('modal-edit-inspection')">
+  <div class="modal" onclick="event.stopPropagation()">
+    <div class="modal-icon modal-icon-add">
+      <svg viewBox="0 0 24 24" fill="none" stroke-width="2"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"/><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"/></svg>
+    </div>
+    <div class="modal-title">Modifier l'Inspection</div>
+    <div class="modal-sub">Mettez à jour les informations de l'inspection.</div>
+    <div class="modal-form">
+      <div class="modal-field">
+        <label>Date d'inspection</label>
+        <input class="modal-input" id="edit-inspect-date" type="date" />
+      </div>
+      <div class="modal-field">
+        <label>Notes (optionnel)</label>
+        <input class="modal-input" id="edit-inspect-notes" placeholder="Ex: Inspection trimestrielle" />
+      </div>
+    </div>
+    <div class="modal-actions">
+      <button class="btn-modal-cancel animated" onclick="closeModal('modal-edit-inspection')">Annuler</button>
+      <button class="btn-modal-confirm primary animated" onclick="saveEditInspection()">Enregistrer</button>
+    </div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="modal-delete-confirm" onclick="closeModal('modal-delete-confirm')">
   <div class="modal" onclick="event.stopPropagation()">
     <div class="modal-icon modal-icon-delete">
@@ -1895,6 +1979,10 @@ function renderManagerHome(el, manager) {
           <div>
             <div class="page-title">${esc(manager.name)}</div>
             <div class="page-sub">${esc(manager.email)} · ${esc(manager.phone||'')}</div>
+            <button class="btn-sm btn-secondary animated" style="margin-top:8px" onclick="openEditManager('${manager.id}')">
+              <svg viewBox="0 0 20 20" stroke-width="2" fill="none"><path d="M11 5l4 4-7 7H4v-4l7-7z"/><path d="M14 3l3 3"/></svg>
+              Modifier
+            </button>
           </div>
         </div>
         <div class="note-panel" style="max-width:420px">
@@ -1991,6 +2079,12 @@ function renderClientView(el, client) {
             <button class="urgency-toggle ${client.urgent ? 'active' : ''}" onclick="toggleClientUrgent('${client.id}')">
               <svg viewBox="0 0 20 20" stroke-width="2"><path d="M8.257 3.099c.765-1.36 2.722-1.36 3.486 0l5.58 9.92c.75 1.334-.213 2.98-1.742 2.98H4.42c-1.53 0-2.493-1.646-1.743-2.98l5.58-9.92zM11 13a1 1 0 11-2 0 1 1 0 012 0zm-1-2V8"/></svg>
               ${client.urgent ? 'Urgent — Retirer' : 'Marquer Urgent'}
+            </button>
+          </div>
+          <div style="margin-top:8px">
+            <button class="btn-sm btn-secondary animated" onclick="openEditClient('${client.id}')">
+              <svg viewBox="0 0 20 20" stroke-width="2" fill="none"><path d="M11 5l4 4-7 7H4v-4l7-7z"/><path d="M14 3l3 3"/></svg>
+              Modifier
             </button>
           </div>
         </div>
@@ -2090,12 +2184,16 @@ function renderInspectionView(el, inspection) {
 
   el.innerHTML = `
     <div class="page-header">
-      <div style="display:flex;align-items:center;gap:12px">
+      <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <div>
           <div class="page-title">Inspection — ${fmtDate(inspection.date)}</div>
           <div class="page-sub">${inspection.notes || ''}</div>
         </div>
         <span class="status-pill status-${inspection.status}" style="margin-left:4px"><span class="status-dot"></span>${statusLabel(inspection.status)}</span>
+        <button class="btn-sm btn-secondary animated" onclick="openEditInspection('${inspection.id}')">
+          <svg viewBox="0 0 20 20" stroke-width="2" fill="none"><path d="M11 5l4 4-7 7H4v-4l7-7z"/><path d="M14 3l3 3"/></svg>
+          Modifier
+        </button>
       </div>
     </div>
 
@@ -2364,6 +2462,75 @@ async function addInspection() {
   } catch(e) {
     toast('Erreur : ' + e.message, 'error');
   }
+}
+
+/* EDIT MANAGER */
+let editManagerId = null;
+function openEditManager(id) {
+  const mgr = getManager(id);
+  if (!mgr) return;
+  editManagerId = id;
+  document.getElementById('edit-manager-name').value  = mgr.name  || '';
+  document.getElementById('edit-manager-email').value = mgr.email || '';
+  document.getElementById('edit-manager-phone').value = mgr.phone || '';
+  openModal('modal-edit-manager');
+}
+async function saveEditManager() {
+  const name  = document.getElementById('edit-manager-name').value.trim();
+  const email = document.getElementById('edit-manager-email').value.trim();
+  const phone = document.getElementById('edit-manager-phone').value.trim();
+  if (!name) { toast('Veuillez saisir un nom', 'error'); return; }
+  try {
+    await apiCall('PATCH', `/api/managers/${editManagerId}`, { name, email, phone });
+    closeModal('modal-edit-manager');
+    toast('Manager mis à jour', 'success');
+  } catch(e) { toast('Erreur : ' + e.message, 'error'); }
+}
+
+/* EDIT CLIENT */
+let editClientId = null;
+function openEditClient(id) {
+  const cli = DB.managers.flatMap(m => m.clients).find(c => c.id === id);
+  if (!cli) return;
+  editClientId = id;
+  document.getElementById('edit-client-name').value  = cli.name  || '';
+  document.getElementById('edit-client-email').value = cli.email || '';
+  document.getElementById('edit-client-type').value  = cli.type  || '';
+  document.getElementById('edit-client-phone').value = cli.phone || '';
+  openModal('modal-edit-client');
+}
+async function saveEditClient() {
+  const name  = document.getElementById('edit-client-name').value.trim();
+  const email = document.getElementById('edit-client-email').value.trim();
+  const type  = document.getElementById('edit-client-type').value.trim();
+  const phone = document.getElementById('edit-client-phone').value.trim();
+  if (!name) { toast('Veuillez saisir un nom', 'error'); return; }
+  try {
+    await apiCall('PATCH', `/api/clients/${editClientId}`, { name, email, type, phone });
+    closeModal('modal-edit-client');
+    toast('Client mis à jour', 'success');
+  } catch(e) { toast('Erreur : ' + e.message, 'error'); }
+}
+
+/* EDIT INSPECTION */
+let editInspectionId = null;
+function openEditInspection(id) {
+  const { ins } = findInspection(id);
+  if (!ins) return;
+  editInspectionId = id;
+  document.getElementById('edit-inspect-date').value  = ins.date  || '';
+  document.getElementById('edit-inspect-notes').value = ins.notes || '';
+  openModal('modal-edit-inspection');
+}
+async function saveEditInspection() {
+  const date  = document.getElementById('edit-inspect-date').value;
+  const notes = document.getElementById('edit-inspect-notes').value.trim();
+  if (!date) { toast('Veuillez sélectionner une date', 'error'); return; }
+  try {
+    await apiCall('PATCH', `/api/inspections/${editInspectionId}`, { date, notes });
+    closeModal('modal-edit-inspection');
+    toast('Inspection mise à jour', 'success');
+  } catch(e) { toast('Erreur : ' + e.message, 'error'); }
 }
 
 /* ADD PHOTO SLOT */
@@ -2726,6 +2893,9 @@ document.addEventListener('keydown', e => {
     if (document.getElementById('modal-add-manager').classList.contains('open')) addManager();
     if (document.getElementById('modal-add-client').classList.contains('open')) addClient();
     if (document.getElementById('modal-add-inspection').classList.contains('open')) addInspection();
+    if (document.getElementById('modal-edit-manager').classList.contains('open')) saveEditManager();
+    if (document.getElementById('modal-edit-client').classList.contains('open')) saveEditClient();
+    if (document.getElementById('modal-edit-inspection').classList.contains('open')) saveEditInspection();
   }
 });
 /* ═══════════════════════════════════════════════════════
