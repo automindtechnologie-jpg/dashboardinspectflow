@@ -3126,6 +3126,11 @@ navigate({ type: 'home' });
 // Charge les données depuis l'API Express
 loadFromCloud();
 
+// SSE — rechargement automatique à chaque mutation serveur
+const _sse = new EventSource('/api/events');
+_sse.addEventListener('update', () => loadFromCloud());
+_sse.onerror = () => {};
+
 // Keyboard shortcut: Cmd+K to toggle sidebar
 document.addEventListener('keydown', e => {
   if ((e.metaKey||e.ctrlKey) && e.key === 'k') { e.preventDefault(); toggleSidebar(); }

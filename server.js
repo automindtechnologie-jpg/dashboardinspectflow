@@ -67,8 +67,37 @@ function sendError(res, e, code = 500) {
   res.status(code).json({ error: msg });
 }
 
+/* ── SSE ────────────────────────────────────────────────────────────── */
+const sseClients = new Set();
+
+function broadcast(type, action, payload) {
+  if (sseClients.size === 0) return;
+  const data = JSON.stringify({ type, action, payload });
+  for (const client of sseClients) {
+    client.write(`event: update\ndata: ${data}\n\n`);
+  }
+}
+
 /* ── Redirect / → /dashboard.html ──────────────────────────────────── */
 app.get('/', (_req, res) => res.redirect('/dashboard.html'));
+
+/* ── GET /api/events (SSE) ──────────────────────────────────────────── */
+app.get('/api/events', (req, res) => {
+  res.setHeader('Content-Type', 'text/event-stream');
+  res.setHeader('Cache-Control', 'no-cache');
+  res.setHeader('Connection', 'keep-alive');
+  res.flushHeaders();
+
+  sseClients.add(res);
+  res.write(': connected\n\n');
+
+  const keepalive = setInterval(() => res.write(': ping\n\n'), 25000);
+
+  req.on('close', () => {
+    clearInterval(keepalive);
+    sseClients.delete(res);
+  });
+});
 
 /* ── GET /api/data ──────────────────────────────────────────────────── */
 app.get('/api/data', async (_req, res) => {
@@ -133,6 +162,7 @@ app.post('/api/managers', async (req, res) => {
       [id, name, email, phone, color, notes]
     );
     res.status(201).json(rows[0]);
+    broadcast('managers', 'create', rows[0]);
   } catch (e) { sendError(res, e); }
 });
 
@@ -150,6 +180,7 @@ app.patch('/api/managers/:id', async (req, res) => {
       vals
     );
     res.json(rows[0]);
+    broadcast('managers', 'update', rows[0]);
   } catch (e) { sendError(res, e); }
 });
 
@@ -157,6 +188,7 @@ app.delete('/api/managers/:id', async (req, res) => {
   try {
     await query('DELETE FROM managers WHERE id = $1', [req.params.id]);
     res.json({ ok: true });
+    broadcast('managers', 'delete', { id: req.params.id });
   } catch (e) { sendError(res, e); }
 });
 
@@ -173,6 +205,7 @@ app.post('/api/clients', async (req, res) => {
       [id, manager_id, name, email, phone, type, !!urgent, notes]
     );
     res.status(201).json(rows[0]);
+    broadcast('clients', 'create', rows[0]);
   } catch (e) { sendError(res, e); }
 });
 
@@ -190,6 +223,7 @@ app.patch('/api/clients/:id', async (req, res) => {
       vals
     );
     res.json(rows[0]);
+    broadcast('clients', 'update', rows[0]);
   } catch (e) { sendError(res, e); }
 });
 
@@ -197,6 +231,7 @@ app.delete('/api/clients/:id', async (req, res) => {
   try {
     await query('DELETE FROM clients WHERE id = $1', [req.params.id]);
     res.json({ ok: true });
+    broadcast('clients', 'delete', { id: req.params.id });
   } catch (e) { sendError(res, e); }
 });
 
@@ -213,6 +248,7 @@ app.post('/api/inspections', async (req, res) => {
       [id, client_id, date, notes, status, !!urgent, inspNotes]
     );
     res.status(201).json(rows[0]);
+    broadcast('inspections', 'create', rows[0]);
   } catch (e) { sendError(res, e); }
 });
 
@@ -237,6 +273,7 @@ app.patch('/api/inspections/:id', async (req, res) => {
       vals
     );
     res.json(rows[0]);
+    broadcast('inspections', 'update', rows[0]);
   } catch (e) { sendError(res, e); }
 });
 
@@ -244,6 +281,7 @@ app.delete('/api/inspections/:id', async (req, res) => {
   try {
     await query('DELETE FROM inspections WHERE id = $1', [req.params.id]);
     res.json({ ok: true });
+    broadcast('inspections', 'delete', { id: req.params.id });
   } catch (e) { sendError(res, e); }
 });
 
@@ -260,6 +298,7 @@ app.post('/api/photos', async (req, res) => {
       [id, inspection_id, sort_order, lieu, probleme, solution]
     );
     res.status(201).json(rows[0]);
+    broadcast('photos', 'create', rows[0]);
   } catch (e) { sendError(res, e); }
 });
 
@@ -285,6 +324,7 @@ app.patch('/api/photos/:id', async (req, res) => {
       vals
     );
     res.json(rows[0]);
+    broadcast('photos', 'update', rows[0]);
   } catch (e) { sendError(res, e); }
 });
 
@@ -292,6 +332,7 @@ app.delete('/api/photos/:id', async (req, res) => {
   try {
     await query('DELETE FROM inspection_photos WHERE id = $1', [req.params.id]);
     res.json({ ok: true });
+    broadcast('photos', 'delete', { id: req.params.id });
   } catch (e) { sendError(res, e); }
 });
 
@@ -314,6 +355,7 @@ app.post('/api/documents', async (req, res) => {
       [id, client_id, inspection_id, name, file_size, file_ext, status, storage_path, storage_url]
     );
     res.status(201).json(rows[0]);
+    broadcast('documents', 'create', rows[0]);
   } catch (e) { sendError(res, e); }
 });
 
@@ -331,6 +373,7 @@ app.patch('/api/documents/:id', async (req, res) => {
       vals
     );
     res.json(rows[0]);
+    broadcast('documents', 'update', rows[0]);
   } catch (e) { sendError(res, e); }
 });
 
@@ -338,6 +381,7 @@ app.delete('/api/documents/:id', async (req, res) => {
   try {
     await query('DELETE FROM documents WHERE id = $1', [req.params.id]);
     res.json({ ok: true });
+    broadcast('documents', 'delete', { id: req.params.id });
   } catch (e) { sendError(res, e); }
 });
 
@@ -352,5 +396,6 @@ app.listen(PORT, async () => {
     process.exit(1);
   }
   console.log(`API      →  http://localhost:${PORT}/api/data`);
+  console.log(`SSE      →  http://localhost:${PORT}/api/events`);
   console.log(`Dashboard →  http://localhost:${PORT}/dashboard.html`);
 });
