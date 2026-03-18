@@ -411,6 +411,30 @@ app.delete('/api/documents/:id', async (req, res) => {
   } catch (e) { sendError(res, e); }
 });
 
+/* ═══════════════════════════════════════════════════════
+   CONFIG
+═══════════════════════════════════════════════════════ */
+app.get('/api/config/:key', async (req, res) => {
+  try {
+    const rows = await query('SELECT value FROM config WHERE key = $1', [req.params.key]);
+    res.json({ value: rows.length ? rows[0].value : null });
+  } catch (e) { sendError(res, e); }
+});
+
+app.put('/api/config/:key', async (req, res) => {
+  const { value } = req.body;
+  if (value === undefined) return sendError(res, 'value requis', 400);
+  try {
+    const rows = await query(
+      `INSERT INTO config (key, value) VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value RETURNING *`,
+      [req.params.key, JSON.stringify(value)]
+    );
+    res.json(rows[0]);
+    broadcast('config', 'update', { key: req.params.key, value });
+  } catch (e) { sendError(res, e); }
+});
+
 /* ── Start ──────────────────────────────────────────────────────────── */
 const PORT = process.env.PORT ?? 3001;
 app.listen(PORT, async () => {
@@ -421,6 +445,9 @@ app.listen(PORT, async () => {
     console.error('[pg]  Connexion échouée :', e.message);
     process.exit(1);
   }
+  // Crée la table config si elle n'existe pas
+  await query(`CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value JSONB)`);
+  console.log(`[pg]  Table config OK`);
   console.log(`API      →  http://localhost:${PORT}/api/data`);
   console.log(`SSE      →  http://localhost:${PORT}/api/events`);
   console.log(`Dashboard →  http://localhost:${PORT}/dashboard.html`);
