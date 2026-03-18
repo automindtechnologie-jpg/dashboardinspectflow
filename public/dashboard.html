@@ -2416,18 +2416,18 @@ function renderPhotoCard(photo, inspectionId) {
       <div class="photo-fields">
         <div class="field-group">
           <span class="field-label">Lieu</span>
-          <input class="field-input" placeholder="Ex: Cuisine, Chambre 12..." value="${esc(photo.lieu||'')}" 
-            onchange="updatePhotoField('${photo.id}','${inspectionId}','lieu',this.value)">
+          <input class="field-input" placeholder="Ex: Cuisine, Chambre 12..." value="${esc(photo.lieu||'')}"
+            oninput="updatePhotoField('${photo.id}','${inspectionId}','lieu',this.value)">
         </div>
         <div class="field-group">
           <span class="field-label">Problème constaté</span>
-          <textarea class="field-input" rows="2" placeholder="Décrivez le problème..." 
-            onchange="updatePhotoField('${photo.id}','${inspectionId}','probleme',this.value)">${esc(photo.probleme||'')}</textarea>
+          <textarea class="field-input" rows="2" placeholder="Décrivez le problème..."
+            oninput="updatePhotoField('${photo.id}','${inspectionId}','probleme',this.value)">${esc(photo.probleme||'')}</textarea>
         </div>
         <div class="field-group">
           <span class="field-label">Solution recommandée</span>
-          <textarea class="field-input" rows="2" placeholder="Solution proposée..." 
-            onchange="updatePhotoField('${photo.id}','${inspectionId}','solution',this.value)">${esc(photo.solution||'')}</textarea>
+          <textarea class="field-input" rows="2" placeholder="Solution proposée..."
+            oninput="updatePhotoField('${photo.id}','${inspectionId}','solution',this.value)">${esc(photo.solution||'')}</textarea>
         </div>
       </div>
       <div class="photo-footer">
@@ -3430,7 +3430,10 @@ loadFromCloud();
 
 // SSE — rechargement automatique à chaque mutation serveur
 const _sse = new EventSource('/api/events');
-_sse.addEventListener('update', () => loadFromCloud());
+_sse.addEventListener('update', () => {
+  if (document.activeElement?.classList.contains('field-input')) return;
+  loadFromCloud();
+});
 _sse.onerror = () => {};
 
 // Keyboard shortcut: Cmd+K to toggle sidebar
