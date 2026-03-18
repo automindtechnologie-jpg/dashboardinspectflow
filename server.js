@@ -10,8 +10,10 @@
 import 'dotenv/config';
 import express        from 'express';
 import pg             from 'pg';
+import multer         from 'multer';
 import { fileURLToPath } from 'url';
 import path           from 'path';
+import fs             from 'fs';
 
 const { Pool } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -31,6 +33,22 @@ async function query(sql, params = []) {
 const app = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, 'public')));
+app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
+
+/* ── Multer — upload local ──────────────────────────────────────────── */
+const storage = multer.diskStorage({
+  destination(req, _file, cb) {
+    const sub = req.query.type === 'doc' ? 'docs' : 'photos';
+    const dir = path.join(__dirname, 'public', 'uploads', sub);
+    fs.mkdirSync(dir, { recursive: true });
+    cb(null, dir);
+  },
+  filename(_req, file, cb) {
+    // Garde le nom fourni par le client (ex. photoId.webp ou docId.pdf)
+    cb(null, file.originalname);
+  },
+});
+const upload = multer({ storage });
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 function mapDoc(d) {
@@ -77,6 +95,14 @@ function broadcast(type, action, payload) {
     client.write(`event: update\ndata: ${data}\n\n`);
   }
 }
+
+/* ── POST /api/upload ───────────────────────────────────────────────── */
+app.post('/api/upload', upload.single('file'), (req, res) => {
+  if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
+  const sub = req.query.type === 'doc' ? 'docs' : 'photos';
+  const url = `/uploads/${sub}/${req.file.filename}`;
+  res.json({ url });
+});
 
 /* ── Redirect / → /dashboard.html ──────────────────────────────────── */
 app.get('/', (_req, res) => res.redirect('/dashboard.html'));

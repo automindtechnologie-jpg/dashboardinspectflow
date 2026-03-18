@@ -1266,12 +1266,6 @@ input, textarea { font-family: inherit; }
 
 
 </style>
-<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
-<script>
-  const SUPABASE_URL = 'https://zhfbobhirhgtagezflzu.supabase.co';
-  const SUPABASE_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InpoZmJvYmhpcmhndGFnZXpmbHp1Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3NzI5ODk1OTYsImV4cCI6MjA4ODU2NTU5Nn0.WBaiZCj357vPXCN22KcoLbUzrn2efNyijJ3nGMq3l4w';
-  const _supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_KEY);
-</script>
 </head>
 <body>
 
@@ -2704,11 +2698,11 @@ function compressToWebP(file, quality = 0.85, maxWidth = 1920) {
   });
 }
 
-/* IMAGE UPLOAD — compresses to WebP then uploads to Supabase Storage */
+/* IMAGE UPLOAD — compresses to WebP then uploads to VPS local storage */
 function handleImageUpload(input, photoId, inspectionId) {
   const file = input.files[0];
   if (!file) return;
-  
+
   // Show local preview immediately
   const reader = new FileReader();
   reader.onload = async (e) => {
@@ -2721,49 +2715,35 @@ function handleImageUpload(input, photoId, inspectionId) {
     if (overlay) overlay.classList.add('has-photo');
     const dlBtn = document.getElementById('btn-dl-' + photoId);
     if (dlBtn) dlBtn.classList.remove('disabled');
-    
+
     // Compress to WebP
     toast('Compression en cours...', 'success');
     const webpBlob = await compressToWebP(file);
-    const storagePath = `photos/${inspectionId}/${photoId}.webp`;
-    
-    try {
-      const { data: uploadData, error: uploadError } = await _supabase.storage
-        .from('inspection-files')
-        .upload(storagePath, webpBlob, { upsert: true, contentType: 'image/webp' });
-      
-      if (uploadError) {
-        console.error('Upload error:', uploadError);
-        const { ins } = findInspection(inspectionId);
-        const ph = ins.photos.find(p=>p.id===photoId);
-        if (ph) ph.image = dataUrl;
-        saveDB();
-        toast('Photo sauvegardée localement', 'success');
-        return;
-      }
-      
-      const { data: urlData } = _supabase.storage
-        .from('inspection-files')
-        .getPublicUrl(storagePath);
+    const filename = `${photoId}.webp`;
 
-      const publicUrl = urlData.publicUrl;
+    try {
+      const formData = new FormData();
+      formData.append('file', webpBlob, filename);
+      const resp = await fetch('/api/upload?type=photo', { method: 'POST', body: formData });
+      if (!resp.ok) throw new Error('Upload HTTP ' + resp.status);
+      const { url } = await resp.json();
+
       const { ins } = findInspection(inspectionId);
-      const ph = ins.photos.find(p=>p.id===photoId);
+      const ph = ins.photos.find(p => p.id === photoId);
       if (ph) {
-        ph.image = publicUrl;
-        ph.storageUrl = publicUrl;
-        ph.storagePath = storagePath;
+        ph.image = url;
+        ph.storageUrl = url;
+        ph.storagePath = url;
       }
-      if (preview) preview.src = publicUrl;
-      // Persist storage URL in DB (ciblé, sans écraser tout le blob)
-      await apiCall('PATCH', `/api/photos/${photoId}`, { image: publicUrl, storagePath });
+      if (preview) preview.src = url;
+      await apiCall('PATCH', `/api/photos/${photoId}`, { image: url, storagePath: url });
       saveDB();
       const savedKB = Math.round((file.size - webpBlob.size) / 1024);
-      toast(`Photo compressée & uploadée ☁️ (-${savedKB > 0 ? savedKB : 0} Ko)`, 'success');
+      toast(`Photo compressée & uploadée (-${savedKB > 0 ? savedKB : 0} Ko)`, 'success');
     } catch(err) {
       console.error('Upload failed:', err);
       const { ins } = findInspection(inspectionId);
-      const ph = ins.photos.find(p=>p.id===photoId);
+      const ph = ins.photos.find(p => p.id === photoId);
       if (ph) ph.image = dataUrl;
       saveDB();
       toast('Photo sauvegardée localement', 'success');
@@ -3178,17 +3158,19 @@ function _uploadDocs(files, docArray, listId, clientId, inspId) {
     };
     window._docBlobs[doc.id] = file;
 
-    // Upload fichier vers Supabase Storage
-    var storagePath = 'docs/' + (clientId || inspId || 'unknown') + '/' + doc.id + '.' + ext;
+    // Upload fichier vers le stockage local VPS
     var storageUrl = null;
+    var storagePath = null;
     try {
-      var result = await _supabase.storage.from('inspection-files').upload(storagePath, file, { upsert: true });
-      if (!result.error) {
-        var urlResult = _supabase.storage.from('inspection-files').getPublicUrl(storagePath);
-        storageUrl = urlResult.data.publicUrl;
-        doc.storageUrl = storageUrl;
-        doc.storagePath = storagePath;
-      }
+      var formData = new FormData();
+      formData.append('file', file, doc.id + '.' + ext);
+      var resp = await fetch('/api/upload?type=doc', { method: 'POST', body: formData });
+      if (!resp.ok) throw new Error('Upload HTTP ' + resp.status);
+      var result = await resp.json();
+      storageUrl = result.url;
+      storagePath = result.url;
+      doc.storageUrl = storageUrl;
+      doc.storagePath = storagePath;
     } catch(e) { console.error('Doc storage upload error:', e); }
 
     // Persiste les métadonnées en base (opération ciblée, sans race condition)
