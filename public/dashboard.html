@@ -1298,6 +1298,17 @@ input, textarea { font-family: inherit; }
 
     <div class="manager-list" id="manager-list"></div>
 
+    <div class="sidebar-section-label">Administration</div>
+    <div class="manager-item animated" id="admin-nav-item" onclick="openAdmin()">
+      <div style="width:32px;height:32px;border-radius:8px;background:var(--accent-bg);display:flex;align-items:center;justify-content:center;flex-shrink:0">
+        <svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="1.8" width="16" height="16"><path d="M10 2L3 6v4c0 4.418 3.134 8.548 7 9.5C13.866 18.548 17 14.418 17 10V6l-7-4z"/></svg>
+      </div>
+      <div class="manager-info">
+        <div class="manager-name">Espace Admin</div>
+        <div class="manager-meta">Vue globale</div>
+      </div>
+    </div>
+
     <div class="sidebar-status" id="sidebar-status">
       <div class="sidebar-status-row">
         <span>🔴 En attente</span><span id="stat-rouge">0</span>
@@ -1859,6 +1870,8 @@ function updateBreadcrumb() {
   const bc = document.getElementById('breadcrumb');
   const crumbs = [];
   crumbs.push({ label: 'Dashboard', action: () => goHome() });
+  const currentType = navHistory[navIndex]?.type;
+  if (currentType === 'admin') crumbs.push({ label: 'Espace Admin', action: null });
   if (selManager) crumbs.push({ label: selManager.name, action: () => openManager(selManager, false) });
   if (selClient) crumbs.push({ label: selClient.name, action: () => openClient(selClient, false) });
   if (selInspection) crumbs.push({ label: selInspection.notes || 'Inspection', action: null });
@@ -1885,6 +1898,7 @@ function renderView(v) {
   if (v.type === 'manager') return renderManagerHome(content, selManager);
   if (v.type === 'client') return renderClientView(content, selClient);
   if (v.type === 'inspection') return renderInspectionView(content, selInspection);
+  if (v.type === 'admin') return renderAdmin(content, v.filter ?? null);
 }
 
 function renderHome(el) {
@@ -1936,6 +1950,102 @@ function renderHome(el) {
     </div>
   `;
   updateSidebarStats();
+  updateTopbarActions([]);
+}
+
+/* ═══════════════════════════════════════════════════════
+   ADMIN
+═══════════════════════════════════════════════════════ */
+function openAdmin() {
+  selManager = null;
+  selClient = null;
+  selInspection = null;
+  document.querySelectorAll('.manager-item').forEach(el => el.classList.remove('active'));
+  document.getElementById('admin-nav-item').classList.add('active');
+  navigate({ type: 'admin', filter: null });
+}
+
+function openInspFromAdmin(managerId, clientId, inspId) {
+  const mgr = getManager(managerId);
+  const cli = mgr?.clients.find(c => c.id === clientId);
+  const ins = cli?.inspections.find(i => i.id === inspId);
+  if (!mgr || !cli || !ins) return;
+  selManager = mgr;
+  selClient = cli;
+  document.getElementById('admin-nav-item').classList.remove('active');
+  openInspection(ins);
+}
+
+function renderAdmin(el, filter) {
+  const allEntries = DB.managers.flatMap(m =>
+    m.clients.flatMap(c =>
+      c.inspections.map(ins => ({ ins, client: c, manager: m }))
+    )
+  );
+
+  const totalRed    = countStatus('rouge');
+  const totalAmber  = countStatus('jaune');
+  const totalGreen  = countStatus('vert');
+  const totalUrgent = countUrgent();
+
+  const filterLabels = { rouge: 'En attente', jaune: 'Validation', vert: 'Envoyés', urgent: 'Urgences' };
+  const filtered = filter
+    ? allEntries.filter(({ ins }) => filter === 'urgent' ? ins.urgent : ins.status === filter)
+    : null;
+
+  const activeStyle = (f) => filter === f ? 'outline:2px solid var(--accent);outline-offset:2px;' : '';
+
+  el.innerHTML = `
+    <div class="page-header">
+      <div class="page-title">Espace Admin</div>
+      <div class="page-sub">Vue globale — tous managers confondus</div>
+    </div>
+    <div class="stats-row">
+      <div class="stat-card" style="cursor:pointer;${activeStyle('rouge')}" onclick="navigate({type:'admin',filter:'rouge'})">
+        <div class="stat-label">En attente</div>
+        <div class="stat-value" style="color:var(--red)">${totalRed}</div>
+        <div class="stat-sub">inspections</div>
+      </div>
+      <div class="stat-card" style="cursor:pointer;${activeStyle('jaune')}" onclick="navigate({type:'admin',filter:'jaune'})">
+        <div class="stat-label">Validation</div>
+        <div class="stat-value" style="color:var(--amber)">${totalAmber}</div>
+        <div class="stat-sub">en cours</div>
+      </div>
+      <div class="stat-card" style="cursor:pointer;${activeStyle('vert')}" onclick="navigate({type:'admin',filter:'vert'})">
+        <div class="stat-label">Envoyés</div>
+        <div class="stat-value" style="color:var(--green)">${totalGreen}</div>
+        <div class="stat-sub">ce mois</div>
+      </div>
+      <div class="stat-card" style="cursor:pointer;${activeStyle('urgent')}" onclick="navigate({type:'admin',filter:'urgent'})">
+        <div class="stat-label">🚨 Urgences</div>
+        <div class="stat-value" style="color:var(--red)">${totalUrgent}</div>
+        <div class="stat-sub">à traiter</div>
+      </div>
+    </div>
+    ${filter ? `
+      <div class="section-divider">${filterLabels[filter]} — ${filtered.length} inspection${filtered.length !== 1 ? 's' : ''}</div>
+      ${filtered.length === 0
+        ? '<div style="padding:24px;text-align:center;color:var(--text-3);font-size:13px">Aucune inspection dans cette catégorie</div>'
+        : `<div class="cards-grid">
+            ${filtered.map(({ ins, client, manager }) => `
+              <div class="card" style="cursor:pointer" onclick="openInspFromAdmin('${manager.id}','${client.id}','${ins.id}')">
+                <div class="card-icon icon-inspect">
+                  <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
+                </div>
+                <div class="card-body">
+                  <div class="card-name">${esc(ins.notes) || 'Inspection'}</div>
+                  <div class="card-meta">${esc(manager.name)} · ${esc(client.name)}</div>
+                </div>
+                <div class="card-footer">
+                  <span class="status-pill status-${ins.status}"><span class="status-dot"></span>${statusLabel(ins.status)}</span>
+                  ${ins.urgent ? '<span class="urgent-badge">🔴 Urgent</span>' : ''}
+                </div>
+              </div>
+            `).join('')}
+          </div>`
+      }
+    ` : '<div style="padding:24px;text-align:center;color:var(--text-3);font-size:13px">Sélectionnez une catégorie ci-dessus pour voir les inspections</div>'}
+  `;
   updateTopbarActions([]);
 }
 
@@ -2358,6 +2468,7 @@ function openManager(manager, pushNav = true) {
   document.getElementById('sidebar').classList.add('collapsed');
   // Mark active
   document.querySelectorAll('.manager-item').forEach(el => el.classList.remove('active'));
+  document.getElementById('admin-nav-item').classList.remove('active');
   const activeEl = document.querySelector(`[data-mgr-id="${manager.id}"]`);
   if (activeEl) activeEl.classList.add('active');
   navigate({ type: 'manager', manager }, pushNav);
@@ -2380,6 +2491,7 @@ function goHome() {
   selInspection = null;
   sidebarOpen = true;
   document.getElementById('sidebar').classList.remove('collapsed');
+  document.getElementById('admin-nav-item').classList.remove('active');
   navigate({ type: 'home' });
 }
 
