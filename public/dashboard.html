@@ -1407,12 +1407,8 @@ input, textarea { font-family: inherit; }
     <div class="modal-sub">Créer un dossier d'inspection pour ce client.</div>
     <div class="modal-form">
       <div class="modal-field">
-        <label>Date d'inspection</label>
-        <input class="modal-input" id="input-inspect-date" type="date" />
-      </div>
-      <div class="modal-field">
-        <label>Notes (optionnel)</label>
-        <input class="modal-input" id="input-inspect-notes" placeholder="Ex: Inspection trimestrielle" />
+        <label>Titre de l'inspection</label>
+        <input class="modal-input" id="input-inspect-notes" placeholder="Ex: Inspection trimestrielle Q1 2026" />
       </div>
     </div>
     <div class="modal-actions">
@@ -1491,12 +1487,8 @@ input, textarea { font-family: inherit; }
     <div class="modal-sub">Mettez à jour les informations de l'inspection.</div>
     <div class="modal-form">
       <div class="modal-field">
-        <label>Date d'inspection</label>
-        <input class="modal-input" id="edit-inspect-date" type="date" />
-      </div>
-      <div class="modal-field">
-        <label>Notes (optionnel)</label>
-        <input class="modal-input" id="edit-inspect-notes" placeholder="Ex: Inspection trimestrielle" />
+        <label>Titre de l'inspection</label>
+        <input class="modal-input" id="edit-inspect-title" placeholder="ex: Inspection bureau principal" />
       </div>
     </div>
     <div class="modal-actions">
@@ -1866,7 +1858,7 @@ function updateBreadcrumb() {
   crumbs.push({ label: 'Dashboard', action: () => goHome() });
   if (selManager) crumbs.push({ label: selManager.name, action: () => openManager(selManager, false) });
   if (selClient) crumbs.push({ label: selClient.name, action: () => openClient(selClient, false) });
-  if (selInspection) crumbs.push({ label: fmtDate(selInspection.date), action: null });
+  if (selInspection) crumbs.push({ label: selInspection.notes || 'Inspection', action: null });
 
   bc.innerHTML = crumbs.map((c,i) => {
     const isLast = i === crumbs.length - 1;
@@ -2140,7 +2132,7 @@ function renderInspectionCard(insp) {
   return `
     <div class="card" onclick="openInspection(getInspection('${selClient.id}','${insp.id}'))">
       <div class="card-actions" onclick="event.stopPropagation()">
-        <button class="btn-delete-card" onclick="confirmDelete('inspection','${insp.id}','inspection du ${fmtDate(insp.date)}')" title="Supprimer">
+        <button class="btn-delete-card" onclick="confirmDelete('inspection','${insp.id}','${esc(insp.notes) || 'Inspection'}')" title="Supprimer">
           <svg viewBox="0 0 20 20" stroke-width="1.8"><polyline points="3 6 5 6 17 6"/><path d="M16 6v11a1 1 0 01-1 1H5a1 1 0 01-1-1V6m3 0V4a1 1 0 011-1h4a1 1 0 011 1v2"/></svg>
         </button>
       </div>
@@ -2148,7 +2140,7 @@ function renderInspectionCard(insp) {
         <svg viewBox="0 0 24 24" stroke-width="1.8"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
       </div>
       <div class="card-body">
-        <div class="card-name">Inspection — ${fmtDate(insp.date)}</div>
+        <div class="card-name">${esc(insp.notes) || 'Inspection'}</div>
         <div class="card-meta">${insp.notes || 'Aucune note'}</div>
       </div>
       <div style="padding: 4px 0">
@@ -2186,8 +2178,8 @@ function renderInspectionView(el, inspection) {
     <div class="page-header">
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <div>
-          <div class="page-title">Inspection — ${fmtDate(inspection.date)}</div>
-          <div class="page-sub">${inspection.notes || ''}</div>
+          <div class="page-title">${esc(inspection.notes) || 'Inspection'}</div>
+          <div class="page-sub">${inspection.date ? fmtDate(inspection.date) : ''}</div>
         </div>
         <span class="status-pill status-${inspection.status}" style="margin-left:4px"><span class="status-dot"></span>${statusLabel(inspection.status)}</span>
         <button class="btn-sm btn-secondary animated" onclick="openEditInspection('${inspection.id}')">
@@ -2441,9 +2433,9 @@ async function addClient() {
 
 /* ADD INSPECTION */
 async function addInspection() {
-  const date = document.getElementById('input-inspect-date').value;
   const notes = document.getElementById('input-inspect-notes').value.trim();
-  if (!date) { toast('Veuillez sélectionner une date', 'error'); return; }
+  const date = new Date().toISOString().slice(0, 10);
+  if (!notes) { toast('Veuillez saisir un titre', 'error'); return; }
   if (!selClient) return;
   const insp = { id: uid('ins'), date, notes, status: 'draft', urgent: false, inspNotes: '', docs: [], photos: [] };
   try {
@@ -2455,7 +2447,6 @@ async function addInspection() {
     selManager = mgr;
     saveDB();
     closeModal('modal-add-inspection');
-    document.getElementById('input-inspect-date').value = '';
     document.getElementById('input-inspect-notes').value = '';
     renderView({ type: 'client', client: selClient });
     toast('Inspection créée', 'success');
@@ -2482,6 +2473,12 @@ async function saveEditManager() {
   if (!name) { toast('Veuillez saisir un nom', 'error'); return; }
   try {
     await apiCall('PATCH', `/api/managers/${editManagerId}`, { name, email, phone });
+    const mgr = getManager(editManagerId);
+    if (mgr) { mgr.name = name; mgr.email = email; mgr.phone = phone; }
+    if (selManager?.id === editManagerId) selManager = getManager(editManagerId);
+    saveDB();
+    renderSidebar();
+    if (selManager?.id === editManagerId) renderView({ type: 'manager', manager: selManager });
     closeModal('modal-edit-manager');
     toast('Manager mis à jour', 'success');
   } catch(e) { toast('Erreur : ' + e.message, 'error'); }
@@ -2507,6 +2504,12 @@ async function saveEditClient() {
   if (!name) { toast('Veuillez saisir un nom', 'error'); return; }
   try {
     await apiCall('PATCH', `/api/clients/${editClientId}`, { name, email, type, phone });
+    const cli = DB.managers.flatMap(m => m.clients).find(c => c.id === editClientId);
+    if (cli) { cli.name = name; cli.email = email; cli.type = type; cli.phone = phone; }
+    if (selClient?.id === editClientId) selClient = DB.managers.flatMap(m => m.clients).find(c => c.id === editClientId);
+    saveDB();
+    renderSidebar();
+    if (selClient?.id === editClientId) renderView({ type: 'client', client: selClient });
     closeModal('modal-edit-client');
     toast('Client mis à jour', 'success');
   } catch(e) { toast('Erreur : ' + e.message, 'error'); }
@@ -2518,16 +2521,20 @@ function openEditInspection(id) {
   const { ins } = findInspection(id);
   if (!ins) return;
   editInspectionId = id;
-  document.getElementById('edit-inspect-date').value  = ins.date  || '';
-  document.getElementById('edit-inspect-notes').value = ins.notes || '';
+  document.getElementById('edit-inspect-title').value = ins.notes || '';
   openModal('modal-edit-inspection');
 }
 async function saveEditInspection() {
-  const date  = document.getElementById('edit-inspect-date').value;
-  const notes = document.getElementById('edit-inspect-notes').value.trim();
-  if (!date) { toast('Veuillez sélectionner une date', 'error'); return; }
+  const notes = document.getElementById('edit-inspect-title').value.trim();
+  if (!notes) { toast('Veuillez saisir un titre', 'error'); return; }
   try {
-    await apiCall('PATCH', `/api/inspections/${editInspectionId}`, { date, notes });
+    await apiCall('PATCH', `/api/inspections/${editInspectionId}`, { notes });
+    const { ins } = findInspection(editInspectionId);
+    if (ins) { ins.notes = notes; }
+    if (selInspection?.id === editInspectionId) selInspection = ins;
+    saveDB();
+    renderSidebar();
+    if (selInspection?.id === editInspectionId) renderView({ type: 'inspection', inspection: selInspection });
     closeModal('modal-edit-inspection');
     toast('Inspection mise à jour', 'success');
   } catch(e) { toast('Erreur : ' + e.message, 'error'); }
@@ -3287,9 +3294,6 @@ function downloadPhoto(photoId, inspectionId) {
 /* ═══════════════════════════════════════════════════════
    INIT
 ═══════════════════════════════════════════════════════ */
-// Set default date for inspection modal
-document.getElementById('input-inspect-date').valueAsDate = new Date();
-
 renderSidebar();
 navigate({ type: 'home' });
 
