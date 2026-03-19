@@ -2437,6 +2437,9 @@ function renderInspectionView(el, inspection) {
           <svg viewBox="0 0 20 20" stroke-width="2" fill="none"><path d="M11 5l4 4-7 7H4v-4l7-7z"/><path d="M14 3l3 3"/></svg>
           Edit Mode
         </button>
+        <button class="btn-sm btn-edit-mode" style="background:#92400e" onclick="openEditModeWithTemplate('${inspection.id}')">
+          ⭐ Template
+        </button>
         <button class="btn-submit-rapport" id="btn-submit-rapport" onclick="submitRapport('${inspection.id}')" ${!allValidated?'disabled':''} style="padding:7px 14px;font-size:12px">
           <svg viewBox="0 0 20 20" stroke-width="2"><path d="M3 10l7-7 7 7"/><path d="M10 3v14"/></svg>
           Soumettre
@@ -3572,6 +3575,50 @@ function viewPhoto(src, idx, lieu) {
    pre-fills with inspection data, saves back via localStorage.
 ═══════════════════════════════════════════════════════ */
 
+async function openEditModeWithTemplate(inspId) {
+  var r = findInspection(inspId);
+  var ins = r && r.ins;
+  if (!ins) return;
+
+  var tplResp = await fetch('/api/config/master_template');
+  var cfg = await tplResp.json();
+  if (!cfg.value) { toast('Aucun template configuré', 'error'); return; }
+
+  var ms = JSON.parse(JSON.stringify(cfg.value));
+  if (ms.editables) {
+    delete ms.editables['cover-text-el'];
+    delete ms.editables['intro-text-el'];
+  }
+
+  var clientName = (selClient && selClient.name) ? selClient.name : '';
+  var mgrName    = (selManager && selManager.name) ? selManager.name : '';
+  var photos     = ins.photos || [];
+
+  var coverText = 'Hardy Henry Services Ltee\nPest Control & Hygiene Solutions';
+  if (clientName) coverText += '\n\nPrepared for ' + clientName;
+  if (ins.date)   coverText += '\nDate: ' + fmtDate(ins.date);
+  if (mgrName)    coverText += '\nInspector: ' + mgrName;
+  if (ins.notes)  coverText += '\n\n' + ins.notes;
+
+  var introText = '';
+  if (ins.date)      introText += fmtDate(ins.date);
+  if (ins.notes)     introText += ' — ' + ins.notes + '\n\n';
+  if (mgrName)       introText += mgrName + ' - Inspector\n\n';
+  if (clientName)    introText += 'Prepared for ' + clientName + '\n\n';
+  introText += 'This report summarizes the findings of our scheduled pest control inspection. All areas were thoroughly examined following our standard protocol. Recommendations are provided for each identified risk area.';
+
+  _openTplTab({
+    inspId:    inspId,
+    coverText: coverText,
+    introText: introText,
+    date:      ins.date || '',
+    photos:    photos.map(function(p) {
+      return { image: p.image || null, lieu: p.lieu || '', probleme: p.probleme || '', solution: p.solution || '' };
+    }),
+    restore: { templateState: ms }
+  });
+}
+
 async function seOpen(inspId) {
   var r = findInspection(inspId);
   var ins = r && r.ins;
@@ -4277,7 +4324,9 @@ async function confirmSave() {
       body: JSON.stringify({ value: saves })
     });
     if (!putResp.ok) throw new Error('HTTP ' + putResp.status);
-    // Signal dashboard to refresh the saves panel
+    // Rafraîchir le panel dans l'onglet parent
+    try { if (window.opener && window.opener.refreshSavesPanel) await window.opener.refreshSavesPanel(INSP_ID); } catch(x) {}
+    // Signal de secours via localStorage pour les cas où opener n'est pas accessible
     try { localStorage.setItem('se_tpl_saved_' + INSP_ID, Date.now().toString()); } catch(x) {}
     closeSaveModal();
     toast('\u2705 Sauvegarde effectu\u00e9e');
