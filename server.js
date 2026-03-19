@@ -11,6 +11,7 @@ import 'dotenv/config';
 import express        from 'express';
 import pg             from 'pg';
 import multer         from 'multer';
+import sharp          from 'sharp';
 import { fileURLToPath } from 'url';
 import path           from 'path';
 import fs             from 'fs';
@@ -31,24 +32,13 @@ async function query(sql, params = []) {
 
 /* ── Express ────────────────────────────────────────────────────────── */
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ limit: '50mb', extended: true }));
 app.use(express.static(path.join(__dirname, 'public')));
 app.use('/uploads', express.static(path.join(__dirname, 'public', 'uploads')));
 
-/* ── Multer — upload local ──────────────────────────────────────────── */
-const storage = multer.diskStorage({
-  destination(req, _file, cb) {
-    const sub = req.query.type === 'doc' ? 'docs' : 'photos';
-    const dir = path.join(__dirname, 'public', 'uploads', sub);
-    fs.mkdirSync(dir, { recursive: true });
-    cb(null, dir);
-  },
-  filename(_req, file, cb) {
-    // Garde le nom fourni par le client (ex. photoId.webp ou docId.pdf)
-    cb(null, file.originalname);
-  },
-});
-const upload = multer({ storage });
+/* ── Multer — upload en mémoire (conversion sharp avant écriture) ───── */
+const upload = multer({ storage: multer.memoryStorage() });
 
 /* ── Helpers ────────────────────────────────────────────────────────── */
 function mapDoc(d) {
@@ -97,11 +87,31 @@ function broadcast(type, action, payload) {
 }
 
 /* ── POST /api/upload ───────────────────────────────────────────────── */
-app.post('/api/upload', upload.single('file'), (req, res) => {
+app.post('/api/upload', upload.single('file'), async (req, res) => {
   if (!req.file) return res.status(400).json({ error: 'Aucun fichier reçu' });
-  const sub = req.query.type === 'doc' ? 'docs' : 'photos';
-  const url = `/uploads/${sub}/${req.file.filename}`;
-  res.json({ url });
+
+  const isDoc = req.query.type === 'doc';
+  const sub   = isDoc ? 'docs' : 'photos';
+  const dir   = path.join(__dirname, 'public', 'uploads', sub);
+  fs.mkdirSync(dir, { recursive: true });
+
+  try {
+    let filename, filepath;
+
+    if (!isDoc && req.file.mimetype.startsWith('image/')) {
+      // Convertit toute image en WebP qualité 82
+      const baseName = path.parse(req.file.originalname).name;
+      filename = `${baseName}.webp`;
+      filepath = path.join(dir, filename);
+      await sharp(req.file.buffer).webp({ quality: 82 }).toFile(filepath);
+    } else {
+      filename = req.file.originalname;
+      filepath = path.join(dir, filename);
+      fs.writeFileSync(filepath, req.file.buffer);
+    }
+
+    res.json({ url: `/uploads/${sub}/${filename}` });
+  } catch (e) { sendError(res, e); }
 });
 
 /* ── Redirect / → /dashboard.html ──────────────────────────────────── */
