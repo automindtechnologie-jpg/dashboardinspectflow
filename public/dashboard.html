@@ -2444,14 +2444,13 @@ function renderInspectionView(el, inspection) {
       </div>
     </div>
 
-    ${getInspSavesHtml(inspection.id) !== '<div class="se-no-saves">Aucune sauvegarde</div>' ? `
-    <div class="se-saves-section">
+    <div class="se-saves-section" style="display:none">
       <div class="se-saves-section-title">
         <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.8" width="13" height="13"><path d="M13 2H3a1 1 0 00-1 1v10a1 1 0 001 1h10a1 1 0 001-1V3a1 1 0 00-1-1z"/><path d="M10 2v4H6V2"/><path d="M4 10h8"/></svg>
         Rapports sauvegardés
       </div>
-      <div id="se-saves-panel-${inspection.id}">${getInspSavesHtml(inspection.id)}</div>
-    </div>` : `<div id="se-saves-panel-${inspection.id}" style="display:none"></div>`}
+      <div id="se-saves-panel-${inspection.id}"></div>
+    </div>
 
     <div class="photos-grid" id="photos-grid-${inspection.id}">
       ${inspection.photos.map(p => renderPhotoCard(p, inspection.id)).join('')}
@@ -2477,6 +2476,7 @@ function renderInspectionView(el, inspection) {
   updateTopbarActions([
     { label: 'Ajouter Photo', icon: 'plus', action: `addPhotoSlot('${inspection.id}')`, primary: false }
   ]);
+  refreshSavesPanel(inspection.id);
 }
 
 function renderPhotoCard(photo, inspectionId) {
@@ -3596,7 +3596,7 @@ async function seOpen(inspId) {
 
   // Pour une inspection vierge (0 save), tenter d'appliquer le master template
   var restore = null;
-  var saves = seGetSaves(inspId);
+  var saves = await seGetSaves(inspId);
   if (saves.length === 0) {
     try {
       var resp = await fetch('/api/config/master_template');
@@ -3724,7 +3724,7 @@ function _openTplTab(data) {
 
   // Restore state if loading a saved report
   if (data.restore && data.restore.templateState) {
-    html = html.replace('var RESTORE_STATE = null;', 'var RESTORE_STATE = ' + JSON.stringify(data.restore.templateState) + ';');
+    html = html.replace('var RESTORE_STATE = null;', 'var RESTORE_STATE = ' + JSON.stringify(data.restore) + ';');
   }
 
   // Fix escaped script tags back
@@ -3738,8 +3738,12 @@ function _openTplTab(data) {
 /* ═══════════════════════════════════════════════════════
    SAVES SYSTEM
 ═══════════════════════════════════════════════════════ */
-function seGetSaves(inspId) {
-  try { var r = localStorage.getItem('se_saves_' + inspId); return r ? JSON.parse(r) : []; } catch(e) { return []; }
+async function seGetSaves(inspId) {
+  try {
+    var resp = await fetch('/api/config/se_saves_' + inspId);
+    var cfg = await resp.json();
+    return Array.isArray(cfg.value) ? cfg.value : [];
+  } catch(e) { return []; }
 }
 
 function seDeleteSaveAsk(inspId, saveId) {
@@ -3754,16 +3758,20 @@ function seDeleteSaveCancel(inspId, saveId) {
   el.querySelector('.se-sv-del-confirm').style.display = 'none';
   el.querySelector('.se-sv-del-btn').style.display = '';
 }
-function seDeleteSaveConfirm(inspId, saveId) {
-  var saves = seGetSaves(inspId).filter(function(s) { return s.id !== saveId; });
-  localStorage.setItem('se_saves_' + inspId, JSON.stringify(saves));
-  var panel = document.getElementById('se-saves-panel-' + inspId);
-  if (panel) panel.innerHTML = getInspSavesHtml(inspId);
+async function seDeleteSaveConfirm(inspId, saveId) {
+  var saves = (await seGetSaves(inspId)).filter(function(s) { return s.id !== saveId; });
+  try {
+    await fetch('/api/config/se_saves_' + inspId, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: saves })
+    });
+  } catch(e) { /* ignore */ }
+  await refreshSavesPanel(inspId);
   toast('Sauvegarde supprimée', 'success');
 }
 
-function getInspSavesHtml(inspId) {
-  var saves = seGetSaves(inspId);
+function buildSavesHtml(inspId, saves) {
   if (!saves.length) return '<div class="se-no-saves">Aucune sauvegarde</div>';
   return saves.map(function(sv) {
     var d = new Date(sv.createdAt);
@@ -3782,16 +3790,21 @@ function getInspSavesHtml(inspId) {
   }).join('');
 }
 
+async function refreshSavesPanel(inspId) {
+  var panel = document.getElementById('se-saves-panel-' + inspId);
+  if (!panel) return;
+  var saves = await seGetSaves(inspId);
+  panel.innerHTML = buildSavesHtml(inspId, saves);
+  var section = panel.closest('.se-saves-section');
+  if (section) section.style.display = saves.length ? '' : 'none';
+  panel.style.display = saves.length ? '' : 'none';
+}
+
 // Listen for save events from template editor tabs
-window.addEventListener('storage', function(e) {
+window.addEventListener('storage', async function(e) {
   if (e.key && e.key.startsWith('se_tpl_saved_')) {
     var inspId = e.key.replace('se_tpl_saved_', '');
-    var panel = document.getElementById('se-saves-panel-' + inspId);
-    if (panel) {
-      panel.innerHTML = getInspSavesHtml(inspId);
-      var section = panel.closest('.se-saves-section');
-      if (section) section.style.display = '';
-    }
+    await refreshSavesPanel(inspId);
     toast('Sauvegarde reçue du template editor', 'success');
     try { localStorage.removeItem(e.key); } catch(x) {}
   }
@@ -4237,14 +4250,18 @@ function closeSaveModal() {
   document.getElementById('save-modal').classList.remove('open');
 }
 
-function confirmSave() {
+async function confirmSave() {
   var inp = document.getElementById('save-name-input');
   var name = inp.value.trim();
   if (!name) { inp.style.borderColor = '#DC2626'; inp.focus(); return; }
 
   var state = collectTemplateState();
   var saves = [];
-  try { var raw = localStorage.getItem('se_saves_' + INSP_ID); if (raw) saves = JSON.parse(raw); } catch(e) {}
+  try {
+    var getResp = await fetch('/api/config/se_saves_' + INSP_ID);
+    var cfg = await getResp.json();
+    if (Array.isArray(cfg.value)) saves = cfg.value;
+  } catch(e) {}
 
   saves.unshift({
     id: 'sv_' + Date.now() + '_' + Math.random().toString(36).substr(2,5),
@@ -4254,12 +4271,18 @@ function confirmSave() {
   });
 
   try {
-    localStorage.setItem('se_saves_' + INSP_ID, JSON.stringify(saves));
-    localStorage.setItem('se_tpl_saved_' + INSP_ID, Date.now().toString());
+    var putResp = await fetch('/api/config/se_saves_' + INSP_ID, {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ value: saves })
+    });
+    if (!putResp.ok) throw new Error('HTTP ' + putResp.status);
+    // Signal dashboard to refresh the saves panel
+    try { localStorage.setItem('se_tpl_saved_' + INSP_ID, Date.now().toString()); } catch(x) {}
     closeSaveModal();
-    toast('\u2705 "' + name + '" sauvegarde !');
+    toast('\u2705 Sauvegarde effectu\u00e9e');
   } catch(e) {
-    toast('Erreur: ' + (e && e.name === 'QuotaExceededError' ? 'stockage plein' : (e ? e.message : 'inconnue')));
+    toast('Erreur: ' + (e ? e.message : 'inconnue'));
   }
 }
 
