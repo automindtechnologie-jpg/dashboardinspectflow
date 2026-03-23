@@ -1263,6 +1263,15 @@ input, textarea { font-family: inherit; }
 .se-sv-del-btn:hover{background:#FEE2E2}
 .se-sv-del-yes{background:var(--red);color:#fff;border:none;border-radius:5px;padding:3px 8px;font-size:11px;font-weight:600;cursor:pointer;font-family:inherit}
 .se-sv-del-no{background:var(--bg);color:var(--text-2);border:1px solid var(--border);border-radius:5px;padding:3px 8px;font-size:11px;cursor:pointer;font-family:inherit}
+.doc-upload-progress{display:flex;align-items:center;gap:10px;padding:10px 12px;background:var(--surface);border:1px solid var(--border);border-radius:var(--r-sm);margin-bottom:4px}
+.doc-progress-info{flex:1;min-width:0}
+.doc-progress-name{font-size:12px;font-weight:500;color:var(--text-1);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.doc-progress-bar-wrap{height:4px;background:var(--border);border-radius:2px;margin-top:5px;overflow:hidden}
+.doc-progress-bar{height:100%;background:var(--blue);border-radius:2px;transition:width 0.15s ease;width:0%}
+.doc-progress-pct{font-size:11px;color:var(--text-3);flex-shrink:0;font-variant-numeric:tabular-nums;width:30px;text-align:right}
+.doc-upload-ok{display:flex;align-items:center;gap:8px;padding:8px 12px;background:var(--green-bg);border:1px solid var(--green-soft);border-radius:var(--r-sm);margin-bottom:4px;font-size:12px;color:var(--green);font-weight:500}
+.doc-upload-ok.fadeout{animation:docOkFade 0.4s ease forwards}
+@keyframes docOkFade{to{opacity:0;max-height:0;padding:0;margin:0;border-width:0;overflow:hidden}}
 
 
 </style>
@@ -3207,7 +3216,7 @@ function fmtSize(b) {
 
 function renderDocRow(doc, clientId, inspId) {
   var ti = docTypeIcon(doc.type);
-  var hasBlob = !!window._docBlobs[doc.id];
+  var hasBlob = !!window._docBlobs[doc.id] || !!doc.storageUrl;
   var sLabel = doc.status === 'pending' ? '🔴 En attente approbation'
     : doc.status === 'approved' ? '🔵 Approuvé'
     : '— Aucun statut';
@@ -3238,7 +3247,7 @@ function renderDocRow(doc, clientId, inspId) {
 
 function _uploadDocs(files, docArray, listId, clientId, inspId) {
   if (!files || !files.length) return;
-  files.forEach(async function(file) {
+  Array.from(files).forEach(function(file) {
     var ext = file.name.split('.').pop().toLowerCase();
     var doc = {
       id: uid('doc'),
@@ -3252,45 +3261,110 @@ function _uploadDocs(files, docArray, listId, clientId, inspId) {
     };
     window._docBlobs[doc.id] = file;
 
-    // Upload fichier vers le stockage local VPS
-    var storageUrl = null;
-    var storagePath = null;
-    try {
-      var formData = new FormData();
-      formData.append('file', file, doc.id + '.' + ext);
-      var resp = await fetch('/api/upload?type=doc', { method: 'POST', body: formData });
-      if (!resp.ok) throw new Error('Upload HTTP ' + resp.status);
-      var result = await resp.json();
-      storageUrl = result.url;
-      storagePath = result.url;
-      doc.storageUrl = storageUrl;
-      doc.storagePath = storagePath;
-    } catch(e) { console.error('Doc storage upload error:', e); }
-
-    // Persiste les métadonnées en base (opération ciblée, sans race condition)
-    try {
-      await apiCall('POST', '/api/documents', {
-        id: doc.id,
-        client_id: clientId || null,
-        inspection_id: inspId || null,
-        name: doc.name,
-        file_size: doc.size,
-        file_ext: ext,
-        status: 'none',
-        storage_path: storagePath,
-        storage_url: storageUrl,
-      });
-    } catch(e) { console.error('Doc DB save error:', e); }
-
-    docArray.push(doc);
-    saveDB();
+    // Insérer la barre de progression dans la liste
     var list = document.getElementById(listId);
     if (list) {
       var empty = list.querySelector('.doc-empty');
       if (empty) empty.remove();
-      list.insertAdjacentHTML('beforeend', renderDocRow(doc, clientId || '', inspId || ''));
+      var progId = 'prog-' + doc.id;
+      var shortName = file.name.length > 36 ? file.name.substring(0, 34) + '…' : file.name;
+      list.insertAdjacentHTML('beforeend',
+        '<div class="doc-upload-progress" id="' + progId + '">'
+        + '<div class="doc-progress-info">'
+        + '<div class="doc-progress-name">' + esc(shortName) + '</div>'
+        + '<div class="doc-progress-bar-wrap"><div class="doc-progress-bar" id="bar-' + doc.id + '"></div></div>'
+        + '</div>'
+        + '<span class="doc-progress-pct" id="pct-' + doc.id + '">0%</span>'
+        + '</div>'
+      );
     }
-    toast(file.name.substring(0, 26) + ' uploadé ☁️', 'success');
+
+    // Upload via XHR pour avoir les événements de progression
+    var formData = new FormData();
+    formData.append('file', file, doc.id + '.' + ext);
+    var xhr = new XMLHttpRequest();
+    xhr.open('POST', '/api/upload?type=doc');
+
+    xhr.upload.addEventListener('progress', function(e) {
+      if (!e.lengthComputable) return;
+      var pct = Math.round((e.loaded / e.total) * 100);
+      var bar = document.getElementById('bar-' + doc.id);
+      var pctEl = document.getElementById('pct-' + doc.id);
+      if (bar) bar.style.width = pct + '%';
+      if (pctEl) pctEl.textContent = pct + '%';
+    });
+
+    xhr.addEventListener('load', async function() {
+      var progEl = document.getElementById('prog-' + doc.id);
+      if (xhr.status >= 200 && xhr.status < 300) {
+        try {
+          var result = JSON.parse(xhr.responseText);
+          doc.storageUrl = result.url;
+          doc.storagePath = result.url;
+        } catch(e) { console.error('Parse upload response:', e); }
+
+        // Persiste les métadonnées en base
+        try {
+          await apiCall('POST', '/api/documents', {
+            id: doc.id,
+            client_id: clientId || null,
+            inspection_id: inspId || null,
+            name: doc.name,
+            file_size: doc.size,
+            file_ext: ext,
+            status: 'none',
+            storage_path: doc.storagePath,
+            storage_url: doc.storageUrl,
+          });
+        } catch(e) { console.error('Doc DB save error:', e); }
+
+        docArray.push(doc);
+        saveDB();
+
+        // Remplacer la barre de progression par le message de confirmation puis la ligne doc
+        if (progEl) {
+          var okId = 'ok-' + doc.id;
+          var shortN = doc.name.length > 40 ? doc.name.substring(0, 38) + '…' : doc.name;
+          progEl.outerHTML = '<div class="doc-upload-ok" id="' + okId + '">'
+            + '<svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2" width="14" height="14"><polyline points="2 8 6 12 14 4"/></svg>'
+            + esc(shortN) + ' — uploadé avec succès'
+            + '</div>';
+          // Insérer la ligne doc définitive
+          var list2 = document.getElementById(listId);
+          if (list2) list2.insertAdjacentHTML('beforeend', renderDocRow(doc, clientId || '', inspId || ''));
+          // Faire disparaître le message de confirmation après 2.8s
+          setTimeout(function() {
+            var okEl = document.getElementById(okId);
+            if (okEl) {
+              okEl.classList.add('fadeout');
+              setTimeout(function() { if (okEl.parentNode) okEl.parentNode.removeChild(okEl); }, 500);
+            }
+          }, 2800);
+        }
+      } else {
+        console.error('Doc upload HTTP ' + xhr.status);
+        if (progEl) progEl.remove();
+        // Sauvegarder quand même en mémoire (mode hors-ligne)
+        docArray.push(doc);
+        saveDB();
+        var list3 = document.getElementById(listId);
+        if (list3) list3.insertAdjacentHTML('beforeend', renderDocRow(doc, clientId || '', inspId || ''));
+        toast('Upload échoué — fichier disponible en mémoire seulement', 'error');
+      }
+    });
+
+    xhr.addEventListener('error', function() {
+      console.error('Doc upload network error');
+      var progEl = document.getElementById('prog-' + doc.id);
+      if (progEl) progEl.remove();
+      docArray.push(doc);
+      saveDB();
+      var list4 = document.getElementById(listId);
+      if (list4) list4.insertAdjacentHTML('beforeend', renderDocRow(doc, clientId || '', inspId || ''));
+      toast('Erreur réseau — fichier en mémoire seulement', 'error');
+    });
+
+    xhr.send(formData);
   });
 }
 
@@ -3327,15 +3401,26 @@ async function cycleDocStatus(docId, clientId, inspId) {
 function downloadDoc(docId, clientId, inspId) {
   var blob = window._docBlobs[docId];
   var doc = _findDoc(docId, clientId, inspId);
-  if (!blob || !doc) { toast('Fichier non disponible — rechargez la page', 'error'); return; }
-  var url = URL.createObjectURL(blob);
+  if (!doc) { toast('Document introuvable', 'error'); return; }
   var a = document.createElement('a');
-  a.href = url;
   a.download = doc.name;
-  document.body.appendChild(a);
-  a.click();
-  document.body.removeChild(a);
-  setTimeout(function() { URL.revokeObjectURL(url); }, 2000);
+  if (blob) {
+    var blobUrl = URL.createObjectURL(blob);
+    a.href = blobUrl;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    setTimeout(function() { URL.revokeObjectURL(blobUrl); }, 2000);
+  } else if (doc.storageUrl) {
+    a.href = doc.storageUrl;
+    a.target = '_blank';
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+  } else {
+    toast('Fichier non disponible — rechargez la page', 'error');
+    return;
+  }
   toast('Téléchargement : ' + doc.name.substring(0, 26), 'success');
 }
 
@@ -3539,8 +3624,11 @@ function openLightboxDoc(docId, clientId, inspId) {
   document.getElementById('lightbox-msg').style.display = 'none';
   document.getElementById('lightbox').classList.add('open');
   document.body.style.overflow = 'hidden';
-  if (!blob) { document.getElementById('lightbox-msg').style.display = 'block'; return; }
-  var url = URL.createObjectURL(blob);
+  var url = null;
+  var blobCreated = false;
+  if (blob) { url = URL.createObjectURL(blob); blobCreated = true; }
+  else if (doc && doc.storageUrl) { url = doc.storageUrl; }
+  if (!url) { document.getElementById('lightbox-msg').style.display = 'block'; return; }
   var imgT = ['jpg','jpeg','png','gif','svg','webp'];
   if (doc && doc.type === 'pdf') {
     document.getElementById('lightbox-pdf').src = url;
@@ -3550,6 +3638,7 @@ function openLightboxDoc(docId, clientId, inspId) {
     document.getElementById('lightbox-img').style.display = 'block';
   } else {
     document.getElementById('lightbox-msg').style.display = 'block';
+    if (blobCreated) URL.revokeObjectURL(url);
   }
 }
 function closeLightbox() {
