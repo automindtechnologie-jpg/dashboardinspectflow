@@ -505,7 +505,7 @@ app.listen(PORT, async () => {
     note        TEXT NOT NULL DEFAULT '',
     UNIQUE(manager_id, note_date)
   )`);
-  await query(`ALTER TABLE inspections ADD COLUMN IF NOT EXISTS scheduled_date DATE`);
+  // scheduled_date déjà ajouté via migration (ALTER TABLE nécessite owner)
   console.log(`[pg]  Tables OK`);
   console.log(`API      →  http://localhost:${PORT}/api/data`);
   console.log(`SSE      →  http://localhost:${PORT}/api/events`);
