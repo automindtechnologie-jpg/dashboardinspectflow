@@ -19,10 +19,19 @@ import fs             from 'fs';
 const { Pool } = pg;
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
-/* ── Pool PostgreSQL ────────────────────────────────────────────────── */
-const pool = new Pool({ connectionString: process.env.DATABASE_URL });
+/* ── Logs horodatés ─────────────────────────────────────────────────── */
+const _log = (msg) => console.log(`[${new Date().toISOString()}] ${msg}`);
+const _err = (msg) => console.error(`[${new Date().toISOString()}] ERROR: ${msg}`);
 
-pool.on('error', (err) => console.error('[pg] Unexpected error:', err));
+/* ── Pool PostgreSQL ────────────────────────────────────────────────── */
+const pool = new Pool({
+  connectionString: process.env.DATABASE_URL,
+  max: 20,
+  idleTimeoutMillis: 30000,
+  connectionTimeoutMillis: 5000,
+});
+
+pool.on('error', (err) => _err(`[pg] Unexpected error: ${err.message}`));
 
 /* Wrapper : exécute une requête et retourne les rows */
 async function query(sql, params = []) {
@@ -80,9 +89,13 @@ const sseClients = new Set();
 
 function broadcast(type, action, payload) {
   if (sseClients.size === 0) return;
-  const data = JSON.stringify({ type, action, payload });
+  const data = `event: update\ndata: ${JSON.stringify({ type, action, payload })}\n\n`;
   for (const client of sseClients) {
-    client.write(`event: update\ndata: ${data}\n\n`);
+    try {
+      client.write(data);
+    } catch (err) {
+      sseClients.delete(client);
+    }
   }
 }
 
@@ -491,9 +504,9 @@ const PORT = process.env.PORT ?? 3001;
 app.listen(PORT, async () => {
   try {
     await pool.query('SELECT 1');
-    console.log(`[pg]  Connecté à PostgreSQL`);
+    _log('[pg]  Connecté à PostgreSQL');
   } catch (e) {
-    console.error('[pg]  Connexion échouée :', e.message);
+    _err(`[pg]  Connexion échouée : ${e.message}`);
     process.exit(1);
   }
   // Crée les tables si elles n'existent pas
@@ -505,9 +518,9 @@ app.listen(PORT, async () => {
     note        TEXT NOT NULL DEFAULT '',
     UNIQUE(manager_id, note_date)
   )`);
-  // scheduled_date déjà ajouté via migration (ALTER TABLE nécessite owner)
-  console.log(`[pg]  Tables OK`);
-  console.log(`API      →  http://localhost:${PORT}/api/data`);
-  console.log(`SSE      →  http://localhost:${PORT}/api/events`);
-  console.log(`Dashboard →  http://localhost:${PORT}/dashboard.html`);
+  // scheduled_date et index créés via migration superuser (inspectflow n'est pas owner)
+  _log('[pg]  Tables OK');
+  _log(`API      →  http://localhost:${PORT}/api/data`);
+  _log(`SSE      →  http://localhost:${PORT}/api/events`);
+  _log(`Dashboard →  http://localhost:${PORT}/dashboard.html`);
 });
