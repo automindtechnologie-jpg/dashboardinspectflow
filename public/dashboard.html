@@ -4175,7 +4175,11 @@ loadFromCloud();
 
 // SSE — rechargement automatique à chaque mutation serveur
 const _sse = new EventSource('/api/events');
-_sse.addEventListener('update', () => {
+_sse.addEventListener('update', (e) => {
+  try {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'planning_notes') return; // géré localement, pas de reload
+  } catch(err) {}
   if (document.activeElement?.classList.contains('field-input')) return;
   loadFromCloud();
 });
