@@ -1463,25 +1463,53 @@ input, textarea { font-family: inherit; }
   line-height: 1.5;
 }
 .cal-popup-textarea:focus { border-color: var(--blue); }
+.cal-popup-note-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 7px;
+}
+.cal-popup-save-btn {
+  background: var(--green);
+  color: #fff;
+  border: none;
+  border-radius: var(--r-sm);
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 500;
+  cursor: pointer;
+  transition: background 0.15s, opacity 0.15s;
+}
+.cal-popup-save-btn:hover { opacity: 0.85; }
+.cal-popup-save-btn.saved {
+  background: #1a7a3a;
+}
 .cal-popup-del-note {
-  position: absolute;
-  top: 12px;
-  right: 0;
   background: none;
   border: none;
-  font-size: 16px;
+  font-size: 15px;
   line-height: 1;
   color: var(--text-3);
   cursor: pointer;
-  padding: 0 2px;
+  padding: 2px 4px;
+  border-radius: var(--r-sm);
+  transition: color 0.12s;
+  margin-left: auto;
 }
 .cal-popup-del-note:hover { color: var(--red); }
 /* Recap */
+@keyframes recapFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
 .cal-recap { margin-top: 4px; }
 .cal-recap-empty { font-size: 12px; color: var(--text-3); padding: 8px 0; }
 .cal-recap-item {
   padding: 10px 0;
   border-bottom: 1px solid var(--border);
+  animation: recapFadeIn 0.25s ease forwards;
+  opacity: 0;
 }
 .cal-recap-item:last-child { border-bottom: none; }
 .cal-recap-date {
@@ -2578,6 +2606,10 @@ function _renderRecap() {
       </div>`).join('')}
     </div>`;
   }).join('') || '<div class="cal-recap-empty">Aucune activité planifiée ce mois.</div>';
+
+  recapWrap.querySelectorAll('.cal-recap-item').forEach((el, i) => {
+    el.style.animationDelay = (i * 0.05) + 's';
+  });
 }
 
 function _renderMgrCalendar() {
@@ -2677,50 +2709,64 @@ function _mgrCalDayClick(key, cellEl) {
     <div class="cal-popup-note-wrap">
       <textarea class="cal-popup-textarea" id="cal-note-ta-${key}"
         placeholder="Note planning..."
-        onblur="_calSaveNote('${key}',this.value)"
       >${esc(note)}</textarea>
-      ${note ? `<button class="cal-popup-del-note" onclick="_calDeleteNote('${key}')" title="Supprimer la note">×</button>` : ''}
+      <div class="cal-popup-note-actions">
+        <button class="cal-popup-save-btn" id="cal-save-btn-${key}"
+          onclick="_calSaveNoteFromBtn('${key}')">Sauvegarder</button>
+        ${note ? `<button class="cal-popup-del-note" onclick="_calDeleteNote('${key}')" title="Supprimer la note">× Supprimer</button>` : ''}
+      </div>
     </div>`;
 
   cellEl.appendChild(popup);
   setTimeout(() => { const ta = document.getElementById(`cal-note-ta-${key}`); if (ta) ta.focus(); }, 30);
 
-  // Fermeture popup au clic extérieur → re-render calendrier si note modifiée
+  // Fermeture au clic extérieur — pas de re-render (save est explicite)
   setTimeout(() => {
     document.addEventListener('click', function handler(e) {
       if (!cellEl.contains(e.target)) {
         popup.remove();
         cellEl.classList.remove('cal-cell-active');
         document.removeEventListener('click', handler);
-        // Re-render complet maintenant que le popup est fermé
-        _renderMgrCalendar();
       }
     });
   }, 0);
+}
+
+async function _calSaveNoteFromBtn(key) {
+  const ta  = document.getElementById(`cal-note-ta-${key}`);
+  const btn = document.getElementById(`cal-save-btn-${key}`);
+  if (!ta) return;
+  try {
+    await _calSaveNote(key, ta.value);
+    if (btn) {
+      btn.textContent = '✓ Sauvegardé';
+      btn.classList.add('saved');
+      setTimeout(() => {
+        const popup = document.getElementById('cal-day-popup');
+        if (popup) {
+          const cell = popup.closest('.cal-cell');
+          popup.remove();
+          if (cell) cell.classList.remove('cal-cell-active');
+        }
+        _renderMgrCalendar();
+      }, 1500);
+    }
+  } catch(e) { /* erreur déjà gérée dans _calSaveNote */ }
 }
 
 async function _calSaveNote(key, value) {
   if (!_calManagerId) return;
   const trimmed = value.trim();
   if (trimmed === (_calNotes[key] || '').trim()) return;
-  try {
-    if (trimmed) {
-      await apiCall('PUT', `/api/planning-notes/${_calManagerId}/${key}`, { note: trimmed });
-      _calNotes[key] = trimmed;
-    } else {
-      await apiCall('DELETE', `/api/planning-notes/${_calManagerId}/${key}`);
-      delete _calNotes[key];
-    }
-    // Popup encore ouvert → mise à jour partielle seulement (pas de scroll)
-    if (document.getElementById('cal-day-popup')) {
-      _updateCalCell(key);
-      _renderRecap();
-    } else {
-      _renderMgrCalendar();
-    }
-  } catch(e) {
-    toast('Erreur sauvegarde note planning', 'error');
+  if (trimmed) {
+    await apiCall('PUT', `/api/planning-notes/${_calManagerId}/${key}`, { note: trimmed });
+    _calNotes[key] = trimmed;
+  } else {
+    await apiCall('DELETE', `/api/planning-notes/${_calManagerId}/${key}`);
+    delete _calNotes[key];
   }
+  _updateCalCell(key);
+  _renderRecap();
 }
 
 async function _calDeleteNote(key) {
