@@ -1273,6 +1273,132 @@ input, textarea { font-family: inherit; }
 .doc-upload-ok.fadeout{animation:docOkFade 0.4s ease forwards}
 @keyframes docOkFade{to{opacity:0;max-height:0;padding:0;margin:0;border-width:0;overflow:hidden}}
 
+/* ═══════════════════════════════════════════════════════
+   PLANNING CALENDAR
+═══════════════════════════════════════════════════════ */
+#mgr-calendar-wrap { margin-top: 8px; }
+.cal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+.cal-title {
+  font-size: 14px;
+  font-weight: 500;
+  color: var(--text-1);
+  letter-spacing: 0.3px;
+}
+.cal-nav-btn {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  color: var(--text-2);
+  width: 28px;
+  height: 28px;
+  font-size: 18px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s;
+}
+.cal-nav-btn:hover { background: var(--bg); color: var(--text-1); }
+.cal-grid {
+  display: grid;
+  grid-template-columns: repeat(7, 1fr);
+  gap: 3px;
+}
+.cal-head-cell {
+  font-size: 10px;
+  font-family: 'DM Mono', monospace;
+  letter-spacing: 0.8px;
+  text-transform: uppercase;
+  color: var(--text-3);
+  text-align: center;
+  padding: 4px 0 6px;
+}
+.cal-cell {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-sm);
+  min-height: 52px;
+  padding: 5px 6px 4px;
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  transition: background 0.12s, border-color 0.12s;
+}
+.cal-cell.cal-empty {
+  background: transparent;
+  border-color: transparent;
+  pointer-events: none;
+}
+.cal-cell.cal-today {
+  border-color: var(--blue);
+  background: color-mix(in srgb, var(--blue) 6%, var(--surface));
+}
+.cal-cell.cal-today .cal-day-num { color: var(--blue); font-weight: 600; }
+.cal-cell.cal-has-insps { cursor: pointer; }
+.cal-cell.cal-has-insps:hover { background: var(--bg); border-color: var(--blue-soft, var(--border)); }
+.cal-cell.cal-cell-active { border-color: var(--blue); }
+.cal-day-num {
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  color: var(--text-2);
+  line-height: 1;
+  margin-bottom: 3px;
+}
+.cal-dots {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 3px;
+  margin-top: 2px;
+}
+.cal-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.cal-dot-rouge  { background: var(--red); }
+.cal-dot-jaune  { background: var(--amber); }
+.cal-dot-vert   { background: var(--green); }
+.cal-dot-draft  { background: var(--text-3); }
+.cal-day-popup {
+  position: absolute;
+  top: calc(100% + 6px);
+  left: 0;
+  z-index: 200;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--r-md);
+  box-shadow: var(--shadow-md, 0 4px 16px rgba(0,0,0,.14));
+  padding: 10px 12px;
+  min-width: 200px;
+  max-width: 280px;
+}
+.cal-popup-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  padding: 5px 0;
+  border-bottom: 1px solid var(--border);
+  font-size: 12px;
+  color: var(--text-1);
+}
+.cal-popup-item:last-child { border-bottom: none; }
+.cal-popup-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+.cal-popup-client { font-weight: 500; color: var(--text-1); }
+.cal-popup-status { font-size: 11px; color: var(--text-3); }
 
 </style>
 </head>
@@ -2171,7 +2297,7 @@ function renderManagerCard(m) {
 
 function renderManagerHome(el, manager) {
   if (!manager) return;
-  const allInspections = manager.clients.flatMap(c => c.inspections);
+  const allInspections = manager.clients.flatMap(c => c.inspections.map(i => ({...i, clientName: c.name})));
   const rouge  = allInspections.filter(i=>i.status==='rouge').length;
   const jaune  = allInspections.filter(i=>i.status==='jaune').length;
   const vert   = allInspections.filter(i=>i.status==='vert').length;
@@ -2211,6 +2337,7 @@ function renderManagerHome(el, manager) {
       </div>
     </div>
     <div class="stats-row">
+      <div class="stat-card"><div class="stat-label">📋 Inspections</div><div class="stat-value">${allInspections.length}</div><div class="stat-sub">réalisées</div></div>
       <div class="stat-card"><div class="stat-label">Clients</div><div class="stat-value">${manager.clients.length}</div><div class="stat-sub">dossiers</div></div>
       <div class="stat-card"><div class="stat-label">🔴 En attente</div><div class="stat-value" style="color:var(--red)">${rouge}</div></div>
       <div class="stat-card"><div class="stat-label">🟡 Validation</div><div class="stat-value" style="color:var(--amber)">${jaune}</div></div>
@@ -2230,8 +2357,127 @@ function renderManagerHome(el, manager) {
         <span class="card-add-label">Nouveau client</span>
       </div>
     </div>
+
+    <div class="section-divider">Planning</div>
+    <div id="mgr-calendar-wrap"></div>
   `;
   updateTopbarActions([]);
+  initManagerCalendar(allInspections);
+}
+
+/* ── Planning Calendar ──────────────────────────────────────────────────── */
+let _calYear = null, _calMonth = null, _calInspections = [];
+
+function initManagerCalendar(inspections) {
+  _calInspections = inspections;
+  if (_calYear === null) {
+    const now = new Date();
+    _calYear  = now.getFullYear();
+    _calMonth = now.getMonth();
+  }
+  _renderMgrCalendar();
+}
+
+function _mgrCalNav(delta) {
+  _calMonth += delta;
+  if (_calMonth > 11) { _calMonth = 0; _calYear++; }
+  if (_calMonth < 0)  { _calMonth = 11; _calYear--; }
+  _renderMgrCalendar();
+}
+
+function _renderMgrCalendar() {
+  const wrap = document.getElementById('mgr-calendar-wrap');
+  if (!wrap) return;
+
+  const year = _calYear, month = _calMonth;
+  const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+  const DAYS   = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+
+  // Build day map key→[inspections]
+  const dayMap = {};
+  for (const insp of _calInspections) {
+    if (!insp.date) continue;
+    const d = new Date(insp.date);
+    if (isNaN(d.getTime())) continue;
+    const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+    if (!dayMap[key]) dayMap[key] = [];
+    dayMap[key].push(insp);
+  }
+
+  const firstDay  = new Date(year, month, 1);
+  const totalDays = new Date(year, month + 1, 0).getDate();
+  let startOffset = firstDay.getDay() - 1;
+  if (startOffset < 0) startOffset = 6;
+
+  const now      = new Date();
+  const todayKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+
+  let cells = '';
+  for (let i = 0; i < startOffset; i++) cells += `<div class="cal-cell cal-empty"></div>`;
+  for (let d = 1; d <= totalDays; d++) {
+    const key   = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const insps = dayMap[key] || [];
+    const isToday   = key === todayKey;
+    const hasInsps  = insps.length > 0;
+    const dots = insps.slice(0, 4).map(i => `<span class="cal-dot cal-dot-${i.status||'draft'}"></span>`).join('');
+    cells += `<div class="cal-cell${isToday ? ' cal-today' : ''}${hasInsps ? ' cal-has-insps' : ''}" data-key="${key}"${hasInsps ? ` onclick="_mgrCalDayClick('${key}',this)"` : ''}>
+      <span class="cal-day-num">${d}</span>
+      ${dots ? `<div class="cal-dots">${dots}</div>` : ''}
+    </div>`;
+  }
+
+  wrap.innerHTML = `
+    <div class="cal-header">
+      <button class="cal-nav-btn" onclick="_mgrCalNav(-1)">&#8249;</button>
+      <span class="cal-title">${MONTHS[month]} ${year}</span>
+      <button class="cal-nav-btn" onclick="_mgrCalNav(1)">&#8250;</button>
+    </div>
+    <div class="cal-grid">
+      ${DAYS.map(d => `<div class="cal-head-cell">${d}</div>`).join('')}
+      ${cells}
+    </div>`;
+}
+
+function _mgrCalDayClick(key, cellEl) {
+  // Close existing popup
+  const existing = document.getElementById('cal-day-popup');
+  const wasActive = cellEl.classList.contains('cal-cell-active');
+  document.querySelectorAll('.cal-cell-active').forEach(c => c.classList.remove('cal-cell-active'));
+  if (existing) { existing.remove(); if (wasActive) return; }
+
+  const insps = _calInspections.filter(i => {
+    if (!i.date) return false;
+    const d = new Date(i.date);
+    if (isNaN(d.getTime())) return false;
+    return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}` === key;
+  });
+  if (!insps.length) return;
+
+  cellEl.classList.add('cal-cell-active');
+  const popup = document.createElement('div');
+  popup.id = 'cal-day-popup';
+  popup.className = 'cal-day-popup';
+  popup.innerHTML = insps.map(i => `
+    <div class="cal-popup-item">
+      <span class="cal-popup-dot cal-dot-${i.status||'draft'}" style="background:${i.status==='rouge'?'var(--red)':i.status==='jaune'?'var(--amber)':i.status==='vert'?'var(--green)':'var(--text-3)'}"></span>
+      <div>
+        <div class="cal-popup-client">${esc(i.clientName||'')}</div>
+        <div class="cal-popup-status">${statusLabel(i.status||'draft')}${i.urgent?' · 🚨':''}</div>
+      </div>
+    </div>`).join('');
+  cellEl.style.position = 'relative';
+  cellEl.appendChild(popup);
+
+  // Close on outside click
+  setTimeout(() => {
+    document.addEventListener('click', function handler(e) {
+      if (!cellEl.contains(e.target)) {
+        popup.remove();
+        cellEl.classList.remove('cal-cell-active');
+        document.removeEventListener('click', handler);
+      }
+    });
+  }, 0);
 }
 
 function renderClientCard(client, managerId) {
