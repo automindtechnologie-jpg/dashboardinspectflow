@@ -26,7 +26,7 @@ const _err = (msg) => console.error(`[${new Date().toISOString()}] ERROR: ${msg}
 /* ── Pool PostgreSQL ────────────────────────────────────────────────── */
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  max: 20,
+  max: 50,
   idleTimeoutMillis: 30000,
   connectionTimeoutMillis: 5000,
 });
