@@ -168,12 +168,13 @@ app.get('/api/data', async (_req, res) => {
             inspections: inspections
               .filter(i => i.client_id === c.id)
               .map(i => ({
-                id:        i.id,
-                date:      i.inspection_date,
-                notes:     i.notes,
-                status:    i.status,
-                urgent:    i.urgent,
-                inspNotes: i.insp_notes,
+                id:            i.id,
+                date:          i.inspection_date,
+                scheduledDate: i.scheduled_date ?? null,
+                notes:         i.notes,
+                status:        i.status,
+                urgent:        i.urgent,
+                inspNotes:     i.insp_notes,
                 docs:   docs.filter(d => d.inspection_id === i.id).map(mapDoc),
                 photos: photos.filter(p => p.inspection_id === i.id).map(mapPhoto),
               })),
@@ -275,13 +276,13 @@ app.delete('/api/clients/:id', async (req, res) => {
    INSPECTIONS
 ═══════════════════════════════════════════════════════ */
 app.post('/api/inspections', async (req, res) => {
-  const { id, client_id, date, notes = '', status = 'draft', urgent = false, inspNotes = '' } = req.body;
+  const { id, client_id, date, notes = '', status = 'draft', urgent = false, inspNotes = '', scheduledDate = null } = req.body;
   if (!id || !client_id || !date) return sendError(res, 'id, client_id et date requis', 400);
   try {
     const rows = await query(
-      `INSERT INTO inspections (id, client_id, inspection_date, notes, status, urgent, insp_notes)
-       VALUES ($1,$2,$3,$4,$5,$6,$7) RETURNING *`,
-      [id, client_id, date, notes, status, !!urgent, inspNotes]
+      `INSERT INTO inspections (id, client_id, inspection_date, notes, status, urgent, insp_notes, scheduled_date)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`,
+      [id, client_id, date, notes, status, !!urgent, inspNotes, scheduledDate || null]
     );
     res.status(201).json(rows[0]);
     broadcast('inspections', 'create', rows[0]);
@@ -291,11 +292,12 @@ app.post('/api/inspections', async (req, res) => {
 app.patch('/api/inspections/:id', async (req, res) => {
   /* Mappe camelCase JS → colonne PostgreSQL */
   const fieldMap = {
-    date:      'inspection_date',
-    notes:     'notes',
-    status:    'status',
-    urgent:    'urgent',
-    inspNotes: 'insp_notes',
+    date:          'inspection_date',
+    scheduledDate: 'scheduled_date',
+    notes:         'notes',
+    status:        'status',
+    urgent:        'urgent',
+    inspNotes:     'insp_notes',
   };
   const sets = [], vals = [];
   for (const [jsKey, col] of Object.entries(fieldMap)) {
@@ -445,6 +447,45 @@ app.put('/api/config/:key', async (req, res) => {
   } catch (e) { sendError(res, e); }
 });
 
+/* ═══════════════════════════════════════════════════════
+   PLANNING NOTES
+═══════════════════════════════════════════════════════ */
+app.get('/api/planning-notes/:managerId', async (req, res) => {
+  try {
+    const rows = await query(
+      `SELECT note_date::text, note FROM planning_notes WHERE manager_id = $1 ORDER BY note_date`,
+      [req.params.managerId]
+    );
+    res.json(rows);
+  } catch (e) { sendError(res, e); }
+});
+
+app.put('/api/planning-notes/:managerId/:date', async (req, res) => {
+  const { note = '' } = req.body;
+  try {
+    const rows = await query(
+      `INSERT INTO planning_notes (manager_id, note_date, note)
+       VALUES ($1, $2, $3)
+       ON CONFLICT (manager_id, note_date) DO UPDATE SET note = EXCLUDED.note
+       RETURNING *`,
+      [req.params.managerId, req.params.date, note]
+    );
+    res.json(rows[0]);
+    broadcast('planning_notes', 'update', { managerId: req.params.managerId, date: req.params.date, note });
+  } catch (e) { sendError(res, e); }
+});
+
+app.delete('/api/planning-notes/:managerId/:date', async (req, res) => {
+  try {
+    await query(
+      `DELETE FROM planning_notes WHERE manager_id = $1 AND note_date = $2`,
+      [req.params.managerId, req.params.date]
+    );
+    res.json({ ok: true });
+    broadcast('planning_notes', 'delete', { managerId: req.params.managerId, date: req.params.date });
+  } catch (e) { sendError(res, e); }
+});
+
 /* ── Start ──────────────────────────────────────────────────────────── */
 const PORT = process.env.PORT ?? 3001;
 app.listen(PORT, async () => {
@@ -455,9 +496,17 @@ app.listen(PORT, async () => {
     console.error('[pg]  Connexion échouée :', e.message);
     process.exit(1);
   }
-  // Crée la table config si elle n'existe pas
+  // Crée les tables si elles n'existent pas
   await query(`CREATE TABLE IF NOT EXISTS config (key TEXT PRIMARY KEY, value JSONB)`);
-  console.log(`[pg]  Table config OK`);
+  await query(`CREATE TABLE IF NOT EXISTS planning_notes (
+    id          SERIAL PRIMARY KEY,
+    manager_id  TEXT NOT NULL,
+    note_date   DATE NOT NULL,
+    note        TEXT NOT NULL DEFAULT '',
+    UNIQUE(manager_id, note_date)
+  )`);
+  await query(`ALTER TABLE inspections ADD COLUMN IF NOT EXISTS scheduled_date DATE`);
+  console.log(`[pg]  Tables OK`);
   console.log(`API      →  http://localhost:${PORT}/api/data`);
   console.log(`SSE      →  http://localhost:${PORT}/api/events`);
   console.log(`Dashboard →  http://localhost:${PORT}/dashboard.html`);
