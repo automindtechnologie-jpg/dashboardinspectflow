@@ -20,11 +20,12 @@
 ## Architecture
 
 ```
-public/dashboard.html     → Frontend vanilla JS (~4500+ lignes) — tout le UI
+public/dashboard.html     → Frontend vanilla JS (~4600+ lignes) — tout le UI
 public/uploads/photos/    → Photos d'inspection (stockage local VPS, WebP via sharp)
 public/uploads/docs/      → Documents clients
 server.js                 → API Express + PostgreSQL + SSE + multer upload
 Dockerfile                → node:20-alpine
+CLAUDE.md                 → ce fichier — contexte auto pour Claude Code CLI
 .github/workflows/deploy.yml → CI/CD GitHub Actions → SSH VPS → docker build + restart
 ```
 
@@ -110,6 +111,22 @@ Chaque mutation appelle `broadcast(type, event, data)`.
 Le frontend écoute et met à jour le state local sans recharger.
 Types : `managers`, `clients`, `inspections`, `photos`, `documents`, `config`, `planning_notes`
 
+⚠️ **RÈGLE CRITIQUE SSE** : Le listener SSE frontend ignore les events `planning_notes`
+(type === 'planning_notes') car ils sont gérés localement sans recharger toute la page.
+Ne jamais supprimer ce filtre — il empêche le scroll reset et les animations parasites.
+
+```js
+// dashboard.html ligne ~4178 — NE PAS MODIFIER
+_sse.addEventListener('update', (e) => {
+  try {
+    const msg = JSON.parse(e.data);
+    if (msg.type === 'planning_notes') return; // géré localement
+  } catch(err) {}
+  if (document.activeElement?.classList.contains('field-input')) return;
+  loadFromCloud();
+});
+```
+
 ---
 
 ## Fonctionnalités livrées
@@ -128,10 +145,13 @@ Types : `managers`, `clients`, `inspections`, `photos`, `documents`, `config`, `
 | INFRA | Backup PostgreSQL cron 2h00 | ✅ |
 | P1 | Score inspections — stat-card "📋 Inspections" en premier | ✅ |
 | P2 | Calendrier planning manager — grille mensuelle, dots colorés | ✅ |
-| P3 | Notes planning éditables par date — bouton Sauvegarder + confirmation | ✅ |
+| P3 | Notes planning éditables par date — bouton Sauvegarder + confirmation ✓ | ✅ |
 | P4 | Récap du mois — layout 2 colonnes (récap gauche, calendrier droite) | ✅ |
 | P5 | Date planifiée (scheduled_date) sur fiche inspection → sync calendrier | ✅ |
 | P6 | Animation smooth récap — fade-in staggeré sur nouveaux items uniquement | ✅ |
+| P7 | Aperçu note dans cellule calendrier — 22 premiers caractères | ✅ |
+| FIX | Scroll reset sauvegarde note — SSE planning_notes ignoré par loadFromCloud | ✅ |
+| FIX | Animation récap parasites — existingKeys détecte les items déjà rendus | ✅ |
 
 ---
 
@@ -149,8 +169,9 @@ Types : `managers`, `clients`, `inspections`, `photos`, `documents`, `config`, `
 - **Jamais de librairie externe** — vanilla JS uniquement
 - **Toujours les variables CSS existantes** : `var(--red)`, `var(--amber)`, `var(--green)`, `var(--blue)`, `var(--text-1)`, `var(--text-3)`, `var(--border)`, `var(--bg)`, etc.
 - **Pas de scroll reset** — ne jamais reconstruire `el.innerHTML` de renderManagerHome sauf navigation complète
-- **Sauvegarde auto** = onblur ou onchange → PATCH API immédiat, pas de bouton sauf cas explicite
-- **SSE broadcast** sur toute mutation → sync multi-onglets
+- **Pas de _renderMgrCalendar() depuis _calSaveNote** — utiliser _updateCalCell(key) + _renderRecap() uniquement
+- **SSE planning_notes** — toujours ignoré dans le listener SSE, géré localement
+- **Sauvegarde** — bouton explicite pour le planning, onblur/onchange pour les autres champs
 
 ### Backend
 - **ESM uniquement** — `import/export`, pas de `require()` (sauf dans node -e shell)
