@@ -1511,6 +1511,7 @@ input, textarea { font-family: inherit; }
   animation: recapFadeIn 0.25s ease forwards;
   opacity: 0;
 }
+.cal-recap-item-existing { animation: none; opacity: 1; }
 .cal-recap-item:last-child { border-bottom: none; }
 .cal-recap-date {
   font-size: 12px;
@@ -2592,12 +2593,14 @@ function _renderRecap() {
     return dt.getFullYear() === year && dt.getMonth() === month;
   }).sort();
 
+  const existingKeys = new Set([...recapWrap.querySelectorAll('.cal-recap-item')].map(el => el.dataset.key));
+
   recapWrap.innerHTML = recapKeys.map(key => {
     const dt       = new Date(key + 'T00:00:00');
     const dayLabel = `${DAYS_LONG[dt.getDay()]} ${dt.getDate()} ${MONTHS_SHORT[dt.getMonth()]}`;
     const dayInsps = dayMap[key] || [];
     const dayNote  = _calNotes[key] || '';
-    return `<div class="cal-recap-item">
+    return `<div class="cal-recap-item" data-key="${key}">
       <div class="cal-recap-date">${dayLabel}</div>
       ${dayNote ? `<div class="cal-recap-note">📝 ${esc(dayNote)}</div>` : ''}
       ${dayInsps.map(i => `<div class="cal-recap-insp">
@@ -2608,7 +2611,11 @@ function _renderRecap() {
   }).join('') || '<div class="cal-recap-empty">Aucune activité planifiée ce mois.</div>';
 
   recapWrap.querySelectorAll('.cal-recap-item').forEach((el, i) => {
-    el.style.animationDelay = (i * 0.05) + 's';
+    if (existingKeys.has(el.dataset.key)) {
+      el.classList.add('cal-recap-item-existing');
+    } else {
+      el.style.animationDelay = (i * 0.05) + 's';
+    }
   });
 }
 
@@ -2748,7 +2755,8 @@ async function _calSaveNoteFromBtn(key) {
           popup.remove();
           if (cell) cell.classList.remove('cal-cell-active');
         }
-        _renderMgrCalendar();
+        _updateCalCell(key);
+        _renderRecap();
       }, 1500);
     }
   } catch(e) { /* erreur déjà gérée dans _calSaveNote */ }
@@ -2774,14 +2782,14 @@ async function _calDeleteNote(key) {
   try {
     await apiCall('DELETE', `/api/planning-notes/${_calManagerId}/${key}`);
     delete _calNotes[key];
-    // Fermer le popup puis re-render
     const popup = document.getElementById('cal-day-popup');
     if (popup) {
       const cell = popup.closest('.cal-cell');
       popup.remove();
       if (cell) cell.classList.remove('cal-cell-active');
     }
-    _renderMgrCalendar();
+    _updateCalCell(key);
+    _renderRecap();
     toast('Note supprimée', 'success');
   } catch(e) {
     toast('Erreur suppression note', 'error');
