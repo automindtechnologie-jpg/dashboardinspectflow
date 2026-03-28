@@ -1401,6 +1401,40 @@ input, textarea { font-family: inherit; }
 .cal-popup-status { font-size: 11px; color: var(--text-3); }
 .cal-cell.cal-clickable { cursor: pointer; }
 .cal-cell.cal-clickable:hover { background: var(--bg); }
+.cal-cell-note-preview {
+  font-size: 9px;
+  color: var(--text-3);
+  overflow: hidden;
+  white-space: nowrap;
+  max-width: 100%;
+  text-overflow: ellipsis;
+  display: block;
+  margin-top: 1px;
+  line-height: 1.2;
+}
+/* 2-col planning layout */
+.mgr-planning-layout {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 20px;
+  align-items: start;
+  margin-bottom: 8px;
+}
+@media (max-width: 768px) {
+  .mgr-planning-layout { grid-template-columns: 1fr; }
+}
+.mgr-planning-col {
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 16px;
+  background: var(--surface);
+}
+.mgr-planning-col-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-1);
+  margin-bottom: 12px;
+}
 .cal-note-icon {
   position: absolute;
   bottom: 3px;
@@ -2439,6 +2473,17 @@ function renderManagerHome(el, manager) {
       <div class="stat-card"><div class="stat-label">🚨 Urgences</div><div class="stat-value" style="color:var(--red)">${urgent}</div></div>
     </div>
 
+    <div class="mgr-planning-layout">
+      <div class="mgr-planning-col">
+        <div class="mgr-planning-col-title">Récap du mois</div>
+        <div class="cal-recap" id="mgr-recap-wrap"></div>
+      </div>
+      <div class="mgr-planning-col">
+        <div class="mgr-planning-col-title">Planning</div>
+        <div id="mgr-calendar-wrap"></div>
+      </div>
+    </div>
+
     <div class="section-divider">Clients</div>
     <div class="search-wrap">
       <svg class="search-icon" viewBox="0 0 20 20"><circle cx="9" cy="9" r="5"/><line x1="13.5" y1="13.5" x2="17" y2="17"/></svg>
@@ -2451,9 +2496,6 @@ function renderManagerHome(el, manager) {
         <span class="card-add-label">Nouveau client</span>
       </div>
     </div>
-
-    <div class="section-divider">Planning</div>
-    <div id="mgr-calendar-wrap"></div>
   `;
   updateTopbarActions([]);
   initManagerCalendar(allInspections, manager.id);
@@ -2497,17 +2539,7 @@ function _calDateKey(d) {
   return `${dt.getFullYear()}-${String(dt.getMonth()+1).padStart(2,'0')}-${String(dt.getDate()).padStart(2,'0')}`;
 }
 
-function _renderMgrCalendar() {
-  const wrap = document.getElementById('mgr-calendar-wrap');
-  if (!wrap) return;
-
-  const year = _calYear, month = _calMonth;
-  const MONTHS      = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
-  const DAYS        = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
-  const DAYS_LONG   = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
-  const MONTHS_SHORT= ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
-
-  // Build day map — scheduledDate prioritaire sur date
+function _calBuildDayMap() {
   const dayMap = {};
   for (const insp of _calInspections) {
     const key = _calDateKey(insp.scheduledDate) || _calDateKey(insp.date);
@@ -2515,38 +2547,24 @@ function _renderMgrCalendar() {
     if (!dayMap[key]) dayMap[key] = [];
     dayMap[key].push(insp);
   }
+  return dayMap;
+}
 
-  const firstDay  = new Date(year, month, 1);
-  const totalDays = new Date(year, month + 1, 0).getDate();
-  let startOffset = firstDay.getDay() - 1;
-  if (startOffset < 0) startOffset = 6;
+function _renderRecap() {
+  const recapWrap = document.getElementById('mgr-recap-wrap');
+  if (!recapWrap) return;
 
-  const now      = new Date();
-  const todayKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+  const year = _calYear, month = _calMonth;
+  const DAYS_LONG    = ['Dim','Lun','Mar','Mer','Jeu','Ven','Sam'];
+  const MONTHS_SHORT = ['Jan','Fév','Mar','Avr','Mai','Jun','Jul','Aoû','Sep','Oct','Nov','Déc'];
+  const dayMap = _calBuildDayMap();
 
-  let cells = '';
-  for (let i = 0; i < startOffset; i++) cells += `<div class="cal-cell cal-empty"></div>`;
-  for (let d = 1; d <= totalDays; d++) {
-    const key   = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
-    const insps = dayMap[key] || [];
-    const note  = _calNotes[key] || '';
-    const isToday  = key === todayKey;
-    const hasInsps = insps.length > 0;
-    const dots = insps.slice(0, 4).map(i => `<span class="cal-dot cal-dot-${i.status||'draft'}"></span>`).join('');
-    cells += `<div class="cal-cell cal-clickable${isToday ? ' cal-today' : ''}${hasInsps ? ' cal-has-insps' : ''}" data-key="${key}" onclick="_mgrCalDayClick('${key}',this)">
-      <span class="cal-day-num">${d}</span>
-      ${dots ? `<div class="cal-dots">${dots}</div>` : ''}
-      ${note ? `<span class="cal-note-icon">📝</span>` : ''}
-    </div>`;
-  }
-
-  // Récap du mois
   const recapKeys = [...new Set([...Object.keys(dayMap), ...Object.keys(_calNotes)])].filter(k => {
     const dt = new Date(k + 'T00:00:00');
     return dt.getFullYear() === year && dt.getMonth() === month;
   }).sort();
 
-  const recapItems = recapKeys.map(key => {
+  recapWrap.innerHTML = recapKeys.map(key => {
     const dt       = new Date(key + 'T00:00:00');
     const dayLabel = `${DAYS_LONG[dt.getDay()]} ${dt.getDate()} ${MONTHS_SHORT[dt.getMonth()]}`;
     const dayInsps = dayMap[key] || [];
@@ -2559,7 +2577,41 @@ function _renderMgrCalendar() {
         ${esc(i.clientName||'')} — ${statusLabel(i.status||'draft')}${i.urgent?' 🚨':''}
       </div>`).join('')}
     </div>`;
-  }).join('');
+  }).join('') || '<div class="cal-recap-empty">Aucune activité planifiée ce mois.</div>';
+}
+
+function _renderMgrCalendar() {
+  const wrap = document.getElementById('mgr-calendar-wrap');
+  if (!wrap) return;
+
+  const year = _calYear, month = _calMonth;
+  const MONTHS = ['Janvier','Février','Mars','Avril','Mai','Juin','Juillet','Août','Septembre','Octobre','Novembre','Décembre'];
+  const DAYS   = ['Lun','Mar','Mer','Jeu','Ven','Sam','Dim'];
+  const dayMap = _calBuildDayMap();
+
+  const firstDay  = new Date(year, month, 1);
+  const totalDays = new Date(year, month + 1, 0).getDate();
+  let startOffset = firstDay.getDay() - 1;
+  if (startOffset < 0) startOffset = 6;
+
+  const now      = new Date();
+  const todayKey = `${now.getFullYear()}-${String(now.getMonth()+1).padStart(2,'0')}-${String(now.getDate()).padStart(2,'0')}`;
+
+  let cells = '';
+  for (let i = 0; i < startOffset; i++) cells += `<div class="cal-cell cal-empty"></div>`;
+  for (let d = 1; d <= totalDays; d++) {
+    const key      = `${year}-${String(month+1).padStart(2,'0')}-${String(d).padStart(2,'0')}`;
+    const insps    = dayMap[key] || [];
+    const note     = _calNotes[key] || '';
+    const isToday  = key === todayKey;
+    const dots     = insps.slice(0, 4).map(i => `<span class="cal-dot cal-dot-${i.status||'draft'}"></span>`).join('');
+    const preview  = note ? `<span class="cal-cell-note-preview">${esc(note.length > 22 ? note.slice(0, 22) + '…' : note)}</span>` : '';
+    cells += `<div class="cal-cell cal-clickable${isToday ? ' cal-today' : ''}${insps.length ? ' cal-has-insps' : ''}" data-key="${key}" onclick="_mgrCalDayClick('${key}',this)">
+      <span class="cal-day-num">${d}</span>
+      ${dots ? `<div class="cal-dots">${dots}</div>` : ''}
+      ${note ? `<span class="cal-note-icon">📝</span>${preview}` : ''}
+    </div>`;
+  }
 
   wrap.innerHTML = `
     <div class="cal-header">
@@ -2570,18 +2622,37 @@ function _renderMgrCalendar() {
     <div class="cal-grid">
       ${DAYS.map(d => `<div class="cal-head-cell">${d}</div>`).join('')}
       ${cells}
-    </div>
-    <div class="section-divider" style="margin-top:24px">Récap du mois</div>
-    <div class="cal-recap">
-      ${recapItems || '<div class="cal-recap-empty">Aucune activité planifiée ce mois.</div>'}
     </div>`;
+
+  _renderRecap();
+}
+
+/* Met à jour uniquement l'icône + preview d'une cellule sans re-render le calendrier */
+function _updateCalCell(key) {
+  const cellEl = document.querySelector(`.cal-cell[data-key="${key}"]`);
+  if (!cellEl) return;
+  const note = _calNotes[key] || '';
+  cellEl.querySelectorAll('.cal-note-icon, .cal-cell-note-preview').forEach(el => el.remove());
+  if (note) {
+    const icon = document.createElement('span');
+    icon.className = 'cal-note-icon';
+    icon.textContent = '📝';
+    cellEl.appendChild(icon);
+    const preview = document.createElement('span');
+    preview.className = 'cal-cell-note-preview';
+    preview.textContent = note.length > 22 ? note.slice(0, 22) + '…' : note;
+    cellEl.appendChild(preview);
+  }
 }
 
 function _mgrCalDayClick(key, cellEl) {
   const existing  = document.getElementById('cal-day-popup');
   const wasActive = cellEl.classList.contains('cal-cell-active');
   document.querySelectorAll('.cal-cell-active').forEach(c => c.classList.remove('cal-cell-active'));
-  if (existing) { existing.remove(); if (wasActive) return; }
+  if (existing) {
+    existing.remove();
+    if (wasActive) return;
+  }
 
   cellEl.classList.add('cal-cell-active');
   cellEl.style.position = 'relative';
@@ -2614,12 +2685,15 @@ function _mgrCalDayClick(key, cellEl) {
   cellEl.appendChild(popup);
   setTimeout(() => { const ta = document.getElementById(`cal-note-ta-${key}`); if (ta) ta.focus(); }, 30);
 
+  // Fermeture popup au clic extérieur → re-render calendrier si note modifiée
   setTimeout(() => {
     document.addEventListener('click', function handler(e) {
       if (!cellEl.contains(e.target)) {
         popup.remove();
         cellEl.classList.remove('cal-cell-active');
         document.removeEventListener('click', handler);
+        // Re-render complet maintenant que le popup est fermé
+        _renderMgrCalendar();
       }
     });
   }, 0);
@@ -2637,7 +2711,13 @@ async function _calSaveNote(key, value) {
       await apiCall('DELETE', `/api/planning-notes/${_calManagerId}/${key}`);
       delete _calNotes[key];
     }
-    _renderMgrCalendar();
+    // Popup encore ouvert → mise à jour partielle seulement (pas de scroll)
+    if (document.getElementById('cal-day-popup')) {
+      _updateCalCell(key);
+      _renderRecap();
+    } else {
+      _renderMgrCalendar();
+    }
   } catch(e) {
     toast('Erreur sauvegarde note planning', 'error');
   }
@@ -2648,6 +2728,13 @@ async function _calDeleteNote(key) {
   try {
     await apiCall('DELETE', `/api/planning-notes/${_calManagerId}/${key}`);
     delete _calNotes[key];
+    // Fermer le popup puis re-render
+    const popup = document.getElementById('cal-day-popup');
+    if (popup) {
+      const cell = popup.closest('.cal-cell');
+      popup.remove();
+      if (cell) cell.classList.remove('cal-cell-active');
+    }
     _renderMgrCalendar();
     toast('Note supprimée', 'success');
   } catch(e) {
