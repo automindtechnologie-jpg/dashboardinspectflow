@@ -165,6 +165,12 @@ _sse.addEventListener('update', (e) => {
 | INFRA | Upload local VPS — multer + WebP sharp | ✅ |
 | INFRA | Backup PostgreSQL cron 2h00 | ✅ |
 | INFRA | Volumes persistants photos/docs — bind mounts host VPS | ✅ |
+| INFRA | Pool PG robuste — max:20, timeout 5s/30s | ✅ |
+| INFRA | SSE broadcast guard — try/catch + delete client mort | ✅ |
+| INFRA | SSE reconnect auto frontend — retry 5s sur onerror | ✅ |
+| INFRA | Index PostgreSQL — client_id, inspection_id, manager_id | ✅ |
+| INFRA | Logs horodatés + rotation json-file 10MB x7 | ✅ |
+| INFRA | Volumes persistants photos/docs — bind mounts host VPS | ✅ |
 | P1 | Score inspections — stat-card "📋 Inspections" en premier | ✅ |
 | P2 | Calendrier planning manager — grille mensuelle, dots colorés | ✅ |
 | P3 | Notes planning éditables par date — bouton Sauvegarder + confirmation ✓ | ✅ |
