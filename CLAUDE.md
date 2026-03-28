@@ -21,8 +21,8 @@
 
 ```
 public/dashboard.html     → Frontend vanilla JS (~4600+ lignes) — tout le UI
-public/uploads/photos/    → Photos d'inspection (stockage local VPS, WebP via sharp)
-public/uploads/docs/      → Documents clients
+public/uploads/photos/    → Symlink → /root/inspectflow-data/photos (volume persistant VPS)
+public/uploads/docs/      → Symlink → /root/inspectflow-data/docs (volume persistant VPS)
 server.js                 → API Express + PostgreSQL + SSE + multer upload
 Dockerfile                → node:20-alpine
 CLAUDE.md                 → ce fichier — contexte auto pour Claude Code CLI
@@ -42,6 +42,28 @@ CLAUDE.md                 → ce fichier — contexte auto pour Claude Code CLI
 
 ---
 
+## Stockage fichiers — VOLUMES PERSISTANTS
+
+⚠️ **CRITIQUE** : Les photos et docs sont stockés sur le HOST VPS, pas dans le container.
+Un rebuild CI/CD ne détruit JAMAIS les uploads.
+
+```
+Host VPS                              Container InspectFlow
+/root/inspectflow-data/photos   →     /app/public/uploads/photos
+/root/inspectflow-data/docs     →     /app/public/uploads/docs
+```
+
+Configuré dans `/root/docker-compose.yml` section `inspectflow → volumes`.
+Ne jamais supprimer ces bind mounts du compose.
+
+Pour vérifier :
+```bash
+docker inspect root-inspectflow-1 | grep -A 3 Mounts
+# Doit afficher les 2 bind mounts
+```
+
+---
+
 ## Base de données
 
 **Connexion** (depuis le host VPS) :
@@ -50,7 +72,7 @@ docker exec -it postgresql-nx6z-postgresql-1 psql -U DHRPc6BLGZptyhTV -d inspect
 ```
 
 **User app** : `inspectflow` / `InspectFlow2026!`
-**DATABASE_URL** dans `.env` : `postgresql://inspectflow:InspectFlow2026!@localhost:32768/inspectflow`
+**DATABASE_URL** dans `.env` : `postgresql://inspectflow:InspectFlow2026!@postgresql-nx6z-postgresql-1:5432/inspectflow`
 
 **Tables** :
 ```
@@ -112,11 +134,10 @@ Le frontend écoute et met à jour le state local sans recharger.
 Types : `managers`, `clients`, `inspections`, `photos`, `documents`, `config`, `planning_notes`
 
 ⚠️ **RÈGLE CRITIQUE SSE** : Le listener SSE frontend ignore les events `planning_notes`
-(type === 'planning_notes') car ils sont gérés localement sans recharger toute la page.
-Ne jamais supprimer ce filtre — il empêche le scroll reset et les animations parasites.
+car ils sont gérés localement. Ne jamais supprimer ce filtre.
 
 ```js
-// dashboard.html ligne ~4178 — NE PAS MODIFIER
+// dashboard.html — NE PAS MODIFIER
 _sse.addEventListener('update', (e) => {
   try {
     const msg = JSON.parse(e.data);
@@ -143,6 +164,7 @@ _sse.addEventListener('update', (e) => {
 | FIX | Curseur photo — debounce 800ms + SSE guard | ✅ |
 | INFRA | Upload local VPS — multer + WebP sharp | ✅ |
 | INFRA | Backup PostgreSQL cron 2h00 | ✅ |
+| INFRA | Volumes persistants photos/docs — bind mounts host VPS | ✅ |
 | P1 | Score inspections — stat-card "📋 Inspections" en premier | ✅ |
 | P2 | Calendrier planning manager — grille mensuelle, dots colorés | ✅ |
 | P3 | Notes planning éditables par date — bouton Sauvegarder + confirmation ✓ | ✅ |
@@ -150,8 +172,8 @@ _sse.addEventListener('update', (e) => {
 | P5 | Date planifiée (scheduled_date) sur fiche inspection → sync calendrier | ✅ |
 | P6 | Animation smooth récap — fade-in staggeré sur nouveaux items uniquement | ✅ |
 | P7 | Aperçu note dans cellule calendrier — 22 premiers caractères | ✅ |
-| FIX | Scroll reset sauvegarde note — SSE planning_notes ignoré par loadFromCloud | ✅ |
-| FIX | Animation récap parasites — existingKeys détecte les items déjà rendus | ✅ |
+| FIX | Scroll reset sauvegarde note — SSE planning_notes ignoré | ✅ |
+| FIX | Animation récap parasites — existingKeys détecte items déjà rendus | ✅ |
 
 ---
 
@@ -178,6 +200,10 @@ _sse.addEventListener('update', (e) => {
 - **Pas de ALTER TABLE dans server.js** — user inspectflow n'est pas owner
 - **broadcast()** après chaque POST/PATCH/DELETE
 
+### Infra
+- **Volumes persistants** — ne jamais supprimer les bind mounts du docker-compose.yml
+- **Backup compose** — toujours `cp /root/docker-compose.yml /root/docker-compose.yml.save` avant modif
+
 ### Git
 - Toujours commit sur `main` → CI/CD automatique
 - Format commit : `feat:`, `fix:`, `refactor:`, `chore:`
@@ -194,8 +220,12 @@ docker logs root-inspectflow-1 --tail=50
 # Rebuild manuel si CI/CD échoue
 cd /root && docker compose build inspectflow && docker compose up -d --force-recreate inspectflow
 
-# Tester API
-curl -s http://localhost:3001/api/data | head -200
+# Vérifier volumes montés
+docker inspect root-inspectflow-1 | grep -A 3 Mounts
+
+# Vérifier fichiers uploadés
+ls -lh /root/inspectflow-data/photos/
+ls -lh /root/inspectflow-data/docs/
 
 # PostgreSQL direct
 docker exec -it postgresql-nx6z-postgresql-1 psql -U DHRPc6BLGZptyhTV -d inspectflow
@@ -208,6 +238,7 @@ docker exec -it postgresql-nx6z-postgresql-1 psql -U DHRPc6BLGZptyhTV -d inspect
 - **VPS** : Hostinger KVM2 — Ubuntu 24.04 — IP `31.97.71.147`
 - **Traefik** : réseau `root_default`, cert resolver `mytlschallenge`
 - **Compose principal** : `/root/docker-compose.yml` — NE PAS MODIFIER sans backup
+- **Données uploads** : `/root/inspectflow-data/` — NE JAMAIS SUPPRIMER
 - **Backup DB** : cron 2h00 → `/root/backup-inspectflow.sh` → `/root/backups/`
 
 ---
