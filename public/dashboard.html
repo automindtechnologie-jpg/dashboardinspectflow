@@ -3189,10 +3189,7 @@ function renderInspectionView(el, inspection) {
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <div>
           <div class="page-title">${esc(inspection.notes) || 'Inspection'}</div>
-          <div class="insp-scheduled-wrap">
-            <span class="insp-scheduled-label">📅 Date planifiée</span>
-            <input type="date" class="insp-scheduled-input" value="${inspection.scheduledDate||''}" onchange="updateScheduledDate('${inspection.id}',this.value)">
-          </div>
+
         </div>
         <span class="status-pill status-${inspection.status}" style="margin-left:4px"><span class="status-dot"></span>${statusLabel(inspection.status)}</span>
         <button class="btn-sm btn-secondary animated" onclick="openEditInspection('${inspection.id}')">
