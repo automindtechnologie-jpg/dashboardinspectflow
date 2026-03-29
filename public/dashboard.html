@@ -3951,7 +3951,10 @@ function esc(str) {
 function fmtDate(dateStr) {
   if (!dateStr) return '';
   try {
-    const d = new Date(dateStr + 'T00:00:00');
+    // Si déjà un timestamp complet (contient T ou Z), on prend juste la partie date
+    const clean = String(dateStr).includes('T') ? String(dateStr).slice(0, 10) : String(dateStr);
+    const d = new Date(clean + 'T00:00:00');
+    if (isNaN(d.getTime())) return dateStr;
     return d.toLocaleDateString('fr-FR', { day: '2-digit', month: 'short', year: 'numeric' });
   } catch(e) { return dateStr; }
 }
