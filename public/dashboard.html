@@ -2498,22 +2498,23 @@ async function renderPortalAdmin(el) {
         </thead>
         <tbody>`;
     for (const r of rows) {
-      const stars = r.lastRating ? '⭐'.repeat(Math.round(r.lastRating)) : '—';
+      const stars = r.lastRating ? '⭐'.repeat(Math.min(3, Math.round(r.lastRating))) + ` (${r.lastRating})` : '—';
       const portalBadge = r.portalActive
-        ? `<span style="color:var(--green);font-weight:500">✓ Actif</span>`
-        : `<span style="color:var(--text-3)">Inactif</span>`;
+        ? `<span style="color:var(--green);font-weight:500">✓ Push</span>`
+        : `<span style="color:var(--text-3)">—</span>`;
       html += `
           <tr style="border-bottom:1px solid var(--border)">
             <td style="padding:10px 10px"><span style="font-weight:500;color:var(--text-1)">${esc(r.name)}</span></td>
             <td style="padding:10px 10px;color:var(--text-2)">${esc(r.type||'')}</td>
             <td style="padding:10px 10px;text-align:center">${portalBadge}</td>
-            <td style="padding:10px 10px;text-align:center;color:var(--text-2)">${r.pushCount}</td>
+            <td style="padding:10px 10px;text-align:center;color:var(--text-2)">${r.pushedCount}</td>
             <td style="padding:10px 10px;text-align:center;color:var(--text-2)">${r.feedbackCount}</td>
             <td style="padding:10px 10px;text-align:center">${stars}</td>
             <td style="padding:10px 10px;text-align:right">
               <div style="display:flex;gap:6px;justify-content:flex-end;flex-wrap:wrap">
-                <button class="btn-sm btn-secondary animated" onclick="navigate({type:'portal-client',clientId:'${r.id}'})">Voir</button>
+                <button class="btn-sm btn-secondary animated" onclick="openPortalTab('${r.id}')">Voir</button>
                 <button class="btn-sm btn-secondary animated" onclick="copyPortalLink('${r.id}')">🔗 Copier lien</button>
+                <button class="btn-sm btn-secondary animated" onclick="regenerateToken('${r.id}')">🔄 Régénérer</button>
               </div>
             </td>
           </tr>`;
@@ -2534,6 +2535,16 @@ async function copyPortalLink(clientId) {
     toast('Lien copié !', 'success');
   } catch(e) {
     toast('Erreur copie lien : ' + e.message, 'error');
+  }
+}
+
+async function openPortalTab(clientId) {
+  try {
+    const data = await apiCall('GET', `/api/portal/token/${clientId}`);
+    const url = `${location.origin}/client/${data.token}`;
+    window.open(url, '_blank');
+  } catch(e) {
+    toast('Erreur ouverture portail : ' + e.message, 'error');
   }
 }
 
