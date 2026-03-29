@@ -3189,7 +3189,6 @@ function renderInspectionView(el, inspection) {
       <div style="display:flex;align-items:center;gap:12px;flex-wrap:wrap">
         <div>
           <div class="page-title">${esc(inspection.notes) || 'Inspection'}</div>
-          <div class="page-sub">${inspection.date ? fmtDate(inspection.date) : ''}</div>
           <div class="insp-scheduled-wrap">
             <span class="insp-scheduled-label">📅 Date planifiée</span>
             <input type="date" class="insp-scheduled-input" value="${inspection.scheduledDate||''}" onchange="updateScheduledDate('${inspection.id}',this.value)">
