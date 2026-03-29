@@ -1,0 +1,141 @@
+
+/* ═══════════════════════════════════════════════════════
+   PORTAIL CLIENT
+═══════════════════════════════════════════════════════ */
+import crypto from 'crypto';
+
+/* Route page portail client */
+app.get('/client/:token', (_req, res) => {
+  res.sendFile(path.join(__dirname, 'public', 'client-portal.html'));
+});
+
+/* GET /api/portal/token/:clientId — récupère ou crée le token */
+app.get('/api/portal/token/:clientId', async (req, res) => {
+  try {
+    const rows = await query('SELECT * FROM client_tokens WHERE client_id = $1', [req.params.clientId]);
+    if (rows.length) return res.json({ token: rows[0].token });
+    const token = crypto.randomBytes(24).toString('hex');
+    await query('INSERT INTO client_tokens (client_id, token) VALUES ($1, $2)', [req.params.clientId, token]);
+    res.json({ token });
+  } catch (e) { sendError(res, e); }
+});
+
+/* POST /api/portal/token/:clientId/regenerate — régénère le token */
+app.post('/api/portal/token/:clientId/regenerate', async (req, res) => {
+  try {
+    const token = crypto.randomBytes(24).toString('hex');
+    await query(
+      `INSERT INTO client_tokens (client_id, token) VALUES ($1, $2)
+       ON CONFLICT (client_id) DO UPDATE SET token = EXCLUDED.token, created_at = NOW()`,
+      [req.params.clientId, token]
+    );
+    res.json({ token });
+    broadcast('portal_token', 'regenerate', { clientId: req.params.clientId });
+  } catch (e) { sendError(res, e); }
+});
+
+/* POST /api/portal/push/:inspectionId — push une inspection vers le portail */
+app.post('/api/portal/push/:inspectionId', async (req, res) => {
+  const { client_id } = req.body;
+  if (!client_id) return sendError(res, 'client_id requis', 400);
+  try {
+    await query(
+      `INSERT INTO inspection_pushes (inspection_id, client_id)
+       VALUES ($1, $2) ON CONFLICT (inspection_id) DO UPDATE SET pushed_at = NOW()`,
+      [req.params.inspectionId, client_id]
+    );
+    res.json({ ok: true });
+    broadcast('portal_push', 'create', { inspectionId: req.params.inspectionId, clientId: client_id });
+  } catch (e) { sendError(res, e); }
+});
+
+/* DELETE /api/portal/push/:inspectionId — retire une inspection du portail */
+app.delete('/api/portal/push/:inspectionId', async (req, res) => {
+  try {
+    await query('DELETE FROM inspection_pushes WHERE inspection_id = $1', [req.params.inspectionId]);
+    res.json({ ok: true });
+    broadcast('portal_push', 'delete', { inspectionId: req.params.inspectionId });
+  } catch (e) { sendError(res, e); }
+});
+
+/* GET /api/portal/client/:token — données complètes pour le portail client */
+app.get('/api/portal/client/:token', async (req, res) => {
+  try {
+    const tkRows = await query('SELECT * FROM client_tokens WHERE token = $1', [req.params.token]);
+    if (!tkRows.length) return res.status(404).json({ error: 'Lien invalide ou expiré' });
+    const clientId = tkRows[0].client_id;
+
+    const [clients, inspections, photos, docs, pushes, feedbacks] = await Promise.all([
+      query('SELECT * FROM clients WHERE id = $1', [clientId]),
+      query('SELECT i.* FROM inspections i JOIN inspection_pushes p ON p.inspection_id = i.id WHERE p.client_id = $1 ORDER BY i.inspection_date DESC', [clientId]),
+      query('SELECT ip.* FROM inspection_photos ip JOIN inspection_pushes p ON p.inspection_id = ip.inspection_id WHERE p.client_id = $1 ORDER BY ip.sort_order', [clientId]),
+      query('SELECT d.* FROM documents d JOIN inspection_pushes p ON p.inspection_id = d.inspection_id WHERE p.client_id = $1', [clientId]),
+      query('SELECT * FROM inspection_pushes WHERE client_id = $1', [clientId]),
+      query('SELECT * FROM client_feedbacks WHERE client_id = $1', [clientId]),
+    ]);
+
+    if (!clients.length) return res.status(404).json({ error: 'Client introuvable' });
+    const client = clients[0];
+
+    res.json({
+      client: { id: client.id, name: client.name, email: client.email, phone: client.phone, type: client.type, notes: client.notes },
+      inspections: inspections.map(i => ({
+        id: i.id, date: i.inspection_date, notes: i.notes, status: i.status,
+        inspNotes: i.insp_notes, pushedAt: pushes.find(p => p.inspection_id === i.id)?.pushed_at,
+        photos: photos.filter(p => p.inspection_id === i.id).map(mapPhoto),
+        docs: docs.filter(d => d.inspection_id === i.id).map(mapDoc),
+        feedback: feedbacks.find(f => f.inspection_id === i.id) ?? null,
+      })),
+    });
+  } catch (e) { sendError(res, e); }
+});
+
+/* PUT /api/portal/feedback/:inspectionId — soumettre / modifier un feedback */
+app.put('/api/portal/feedback/:inspectionId', async (req, res) => {
+  const { client_id, rating, propre, ponctuel, efficace, comment = '' } = req.body;
+  if (!client_id) return sendError(res, 'client_id requis', 400);
+  try {
+    const rows = await query(
+      `INSERT INTO client_feedbacks (inspection_id, client_id, rating, propre, ponctuel, efficace, comment, updated_at)
+       VALUES ($1,$2,$3,$4,$5,$6,$7,NOW())
+       ON CONFLICT (inspection_id) DO UPDATE SET
+         rating = EXCLUDED.rating, propre = EXCLUDED.propre, ponctuel = EXCLUDED.ponctuel,
+         efficace = EXCLUDED.efficace, comment = EXCLUDED.comment, updated_at = NOW()
+       RETURNING *`,
+      [req.params.inspectionId, client_id, rating, propre, ponctuel, efficace, comment]
+    );
+    res.json(rows[0]);
+    broadcast('portal_feedback', 'upsert', { inspectionId: req.params.inspectionId, clientId: client_id });
+  } catch (e) { sendError(res, e); }
+});
+
+/* GET /api/portal/admin — vue admin : tous les clients avec stats portail */
+app.get('/api/portal/admin', async (_req, res) => {
+  try {
+    const [clients, tokens, pushes, feedbacks] = await Promise.all([
+      query('SELECT * FROM clients ORDER BY name'),
+      query('SELECT * FROM client_tokens'),
+      query('SELECT * FROM inspection_pushes'),
+      query('SELECT * FROM client_feedbacks ORDER BY updated_at DESC'),
+    ]);
+
+    const data = clients.map(c => {
+      const token = tokens.find(t => t.client_id === c.id);
+      const clientPushes = pushes.filter(p => p.client_id === c.id);
+      const clientFeedbacks = feedbacks.filter(f => f.client_id === c.id);
+      const lastFeedback = clientFeedbacks[0] ?? null;
+      return {
+        id: c.id, name: c.name, email: c.email, phone: c.phone, type: c.type,
+        token: token?.token ?? null,
+        portalActive: !!token,
+        pushedCount: clientPushes.length,
+        feedbackCount: clientFeedbacks.length,
+        lastFeedbackAt: lastFeedback?.updated_at ?? null,
+        lastRating: lastFeedback?.rating ?? null,
+        feedbacks: clientFeedbacks,
+      };
+    });
+
+    res.json(data);
+  } catch (e) { sendError(res, e); }
+});
