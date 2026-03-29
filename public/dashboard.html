@@ -2606,8 +2606,12 @@ async function renderPortalClientDetail(el, clientId) {
 async function regenerateToken(clientId) {
   try {
     await apiCall('POST', `/api/portal/token/${clientId}/regenerate`);
-    toast('Lien régénéré', 'success');
-    navigate({ type: 'portal-client', clientId });
+    toast('Lien régénéré — nouveau lien actif', 'success');
+    // Refresh la vue actuelle sans naviguer
+    const v = navHistory[navIndex];
+    if (v?.type === 'portal-admin') renderPortalAdmin(document.getElementById('content'));
+    // Si on est dans la vue détail, on la recharge
+    if (v?.type === 'portal-client') renderPortalClientDetail(document.getElementById('content'), clientId);
   } catch(e) {
     toast('Erreur régénération : ' + e.message, 'error');
   }
