@@ -15,7 +15,7 @@
 - Status : **en prod** — `https://inspectflow.srv937151.hstgr.cloud`
 - Repo : `https://github.com/automindtechnologie-jpg/dashboardinspectflow`
 - Branche prod : `main` — CI/CD GitHub Actions (~26 secondes après push)
-- Commit actuel : `5ad2f30`
+- Commit actuel : `220b0ee`
 
 ---
 
@@ -24,8 +24,8 @@
 ```
 public/dashboard.html         → Frontend vanilla JS (~5300+ lignes) — tout le UI
 public/client-portal.html     → Portail client — vue token (Hardy Henry branding)
-public/uploads/photos/        → Symlink → /root/inspectflow-data/photos (volume persistant VPS)
-public/uploads/docs/          → Symlink → /root/inspectflow-data/docs (volume persistant VPS)
+public/uploads/photos/        → Bind mount → /root/inspectflow-data/photos (volume persistant VPS)
+public/uploads/docs/          → Bind mount → /root/inspectflow-data/docs (volume persistant VPS)
 server.js                     → API Express + PostgreSQL + SSE + multer upload
 Dockerfile                    → node:20-alpine
 CLAUDE.md                     → ce fichier — contexte auto pour Claude Code CLI
@@ -63,7 +63,7 @@ Ne jamais supprimer ces bind mounts du compose.
 
 ## Base de données
 
-**Connexion** (depuis le host VPS) :
+**Connexion superuser** (depuis host VPS) :
 ```bash
 docker exec -it postgresql-nx6z-postgresql-1 psql -U DHRPc6BLGZptyhTV -d inspectflow
 ```
@@ -85,10 +85,14 @@ inspection_pushes → id SERIAL, inspection_id TEXT UNIQUE, client_id TEXT, push
 client_feedbacks  → id SERIAL, inspection_id TEXT UNIQUE, client_id TEXT, rating INT, propre INT, ponctuel INT, efficace INT, comment TEXT, updated_at
 ```
 
-⚠️ **IMPORTANT** : L'user `inspectflow` n'est PAS owner des tables.
-Pour tout ALTER TABLE ou CREATE TABLE → utiliser le superuser `DHRPc6BLGZptyhTV` via docker exec psql.
-Puis accorder les permissions : `GRANT ALL PRIVILEGES ON TABLE ... TO inspectflow;`
-Et les séquences : `GRANT USAGE, SELECT ON SEQUENCE ..._id_seq TO inspectflow;`
+⚠️ **RÈGLE PERMISSIONS** : L'user `inspectflow` n'est PAS owner des tables.
+- CREATE TABLE → toujours via superuser `DHRPc6BLGZptyhTV`
+- Après chaque CREATE TABLE :
+```bash
+GRANT ALL PRIVILEGES ON TABLE nom_table TO inspectflow;
+GRANT USAGE, SELECT ON SEQUENCE nom_table_id_seq TO inspectflow;
+```
+- Ne jamais faire ALTER TABLE depuis server.js
 
 ---
 
@@ -129,12 +133,12 @@ DELETE /api/planning-notes/:managerId/:date     → supprimer note
 ── PORTAIL CLIENT ──────────────────────────────────────────────────────────
 GET  /client/:token                              → sert client-portal.html
 GET  /api/portal/token/:clientId                 → récupère ou crée le token
-POST /api/portal/token/:clientId/regenerate      → régénère le token (invalide l'ancien)
-POST /api/portal/push/:inspectionId              → push inspection vers portail (body: {client_id})
+POST /api/portal/token/:clientId/regenerate      → régénère le token
+POST /api/portal/push/:inspectionId              → push inspection (body: {client_id})
 DELETE /api/portal/push/:inspectionId            → retire inspection du portail
-GET  /api/portal/client/:token                   → données portail (client + inspections pushées + feedbacks)
-PUT  /api/portal/feedback/:inspectionId          → soumettre / modifier un feedback
-GET  /api/portal/admin                           → vue admin : tous clients + stats portail
+GET  /api/portal/client/:token                   → données portail client
+PUT  /api/portal/feedback/:inspectionId          → soumettre / modifier feedback
+GET  /api/portal/admin                           → vue admin tous clients + stats
 ```
 
 ---
@@ -144,48 +148,41 @@ GET  /api/portal/admin                           → vue admin : tous clients + 
 Types : `managers`, `clients`, `inspections`, `photos`, `documents`, `config`, `planning_notes`,
 `portal_push`, `portal_feedback`, `portal_token`
 
-⚠️ **RÈGLE CRITIQUE SSE** :
+⚠️ **RÈGLES CRITIQUES SSE** — ne jamais modifier ce comportement :
 ```js
-// dashboard.html — NE PAS MODIFIER
-_sse.addEventListener('update', (e) => {
-  const msg = JSON.parse(e.data);
-  if (msg.type === 'planning_notes') return; // géré localement
-  if (msg.type === 'portal_token') return;   // ignoré
-  if (msg.type === 'portal_push') { _updatePushBtn(msg.payload.inspectionId); return; }
-  if (msg.type === 'portal_feedback') { /* reload si vue portail */ return; }
-  if (document.activeElement?.classList.contains('field-input')) return;
-  loadFromCloud();
-});
+if (msg.type === 'planning_notes') return; // géré localement
+if (msg.type === 'portal_token') return;   // ignoré
+if (msg.type === 'portal_push') { _updatePushBtn(...); return; }
+if (document.activeElement?.classList.contains('field-input')) return;
+loadFromCloud();
 ```
 
 ---
 
-## Portail Client — architecture
+## Portail Client
 
 **URL client** : `https://inspectflow.srv937151.hstgr.cloud/client/:token`
-**Page** : `public/client-portal.html` — style InspectFlow, header "Hardy Henry Services — Portail Clients"
+**Page** : `public/client-portal.html` — branding "Hardy Henry Services — Portail Clients"
 
-**Flux complet :**
-1. Manager crée fiche client → token généré automatiquement via `GET /api/portal/token/:clientId`
-2. Manager clique "📤 Push" sur une inspection terminée → `POST /api/portal/push/:inspectionId`
-3. Manager clique "🔗 Portail" sur la fiche client → URL copiée dans le presse-papier
-4. Manager envoie URL par WhatsApp au client
-5. Client ouvre `/client/:token` → voit ses inspections + peut laisser feedback (3 étoiles + critères + commentaire)
-6. Feedback SSE → tag "Feedback reçu" dans InspectFlow en temps réel
+**Flux :**
+1. Token auto-créé à `GET /api/portal/token/:clientId`
+2. Manager clique "📤 Push" sur inspection → `POST /api/portal/push/:inspectionId`
+3. Manager clique "🔗 Portail" → URL copiée presse-papier → WhatsApp au client
+4. Client ouvre `/client/:token` → voit inspections + laisse feedback (3 étoiles + critères + commentaire modifiable)
+5. SSE `portal_feedback` → tag "Feedback reçu" en temps réel
 
-**Fonctions dashboard clés :**
-- `openPortalAdmin()` → onglet Portail Clients (sidebar)
-- `renderPortalAdmin(el)` → tableau tous clients + stats (pushedCount, feedbackCount, lastRating)
-- `openPortalTab(clientId)` → ouvre `/client/:token` dans nouvel onglet
-- `copyPortalLink(clientId)` → copie URL dans presse-papier
-- `regenerateToken(clientId)` → régénère token + refresh vue sans navigate
-- `togglePortalPush(inspId, clientId)` → push/dépush inspection
-- `renderPortalClientDetail(el, clientId)` → vue détail client avec feedbacks par inspection
+**Fonctions clés dashboard :**
+- `openPortalAdmin()` → onglet Portail Clients sidebar
+- `renderPortalAdmin(el)` → tableau clients + stats
+- `openPortalTab(clientId)` → ouvre portail dans nouvel onglet
+- `copyPortalLink(clientId)` → copie URL presse-papier
+- `regenerateToken(clientId)` → régénère token + refresh vue sur place (pas navigate)
+- `togglePortalPush(inspId, clientId)` → push/dépush
+- `renderPortalClientDetail(el, clientId)` → vue détail
 
-**Feedbacks** : imbriqués dans chaque `inspection.feedback` (pas de tableau séparé au niveau portail).
-Pour accéder aux feedbacks dans renderPortalClientDetail :
+⚠️ **Feedbacks** : dans `inspection.feedback` (pas `portalData.feedbacks`) :
 ```js
-portalData.inspections.filter(i => i.feedback) // ✅ correct
+portalData.inspections.filter(i => i.feedback) // ✅
 portalData.feedbacks  // ❌ n'existe pas
 ```
 
@@ -195,7 +192,7 @@ portalData.feedbacks  // ❌ n'existe pas
 
 | Feature | Status |
 |---|---|
-| SSE live sync | ✅ |
+| SSE live sync temps réel | ✅ |
 | Fiches éditables managers/clients/inspections | ✅ |
 | Bloc Urgences | ✅ |
 | Espace Admin vue globale | ✅ |
@@ -203,22 +200,29 @@ portalData.feedbacks  // ❌ n'existe pas
 | Volumes persistants bind mounts | ✅ |
 | Backup PostgreSQL cron 2h00 | ✅ |
 | Score inspections stat-card | ✅ |
-| Calendrier planning mensuel + dots | ✅ |
+| Calendrier planning mensuel + dots colorés | ✅ |
 | Notes planning éditables par date | ✅ |
 | Récap du mois 2 colonnes | ✅ |
-| Date planifiée scheduled_date | ✅ |
+| Date planifiée → sync calendrier | ✅ |
 | **Portail Client complet** | ✅ |
-| — Token par client (auto-généré + régénérable) | ✅ |
+| — Token par client (auto + régénérable) | ✅ |
 | — Push inspection vers portail | ✅ |
 | — Page client-portal.html mobile-first | ✅ |
 | — Feedback 3 étoiles + critères + commentaire modifiable | ✅ |
 | — Onglet admin Portail Clients dans dashboard | ✅ |
 | — SSE feedback → tag temps réel | ✅ |
 | **Responsive mobile iPhone** | ✅ |
-| — Calendrier compact (36px min-height, dots 5px) | ✅ |
-| — Popup calendrier centré fixed sur mobile | ✅ |
+| — Calendrier compact (36px, dots 5px, popup fixed centré) | ✅ |
 | — Note preview masquée sur mobile | ✅ |
 | — Media queries 768px + 400px | ✅ |
+| — Boutons inspection 2 par ligne sur mobile | ✅ |
+| — Soumettre pleine largeur sur mobile | ✅ |
+| **Fixes divers** | ✅ |
+| — fmtDate : Invalid Date quand PostgreSQL retourne timestamp complet | ✅ |
+| — Date sous titre inspection supprimée (redondant avec planning) | ✅ |
+| — Bloc "📅 Date planifiée" supprimé de la fiche inspection | ✅ |
+| — regenerateToken : refresh sur place sans navigate | ✅ |
+| — portalData.feedbacks → inspections.filter(i=>i.feedback) | ✅ |
 
 ---
 
@@ -233,25 +237,26 @@ portalData.feedbacks  // ❌ n'existe pas
 
 ### CSS / Frontend
 - **Jamais de librairie externe** — vanilla JS uniquement
-- **Toujours les variables CSS existantes** : `var(--red)`, `var(--amber)`, `var(--green)`, `var(--blue)`, `var(--text-1)`, `var(--text-3)`, `var(--border)`, `var(--bg)`, etc.
+- **Variables CSS existantes** : `var(--red)`, `var(--amber)`, `var(--green)`, `var(--blue)`, `var(--text-1)`, `var(--text-3)`, `var(--border)`, `var(--bg)`
 - **Pas de scroll reset** — ne jamais reconstruire `el.innerHTML` de renderManagerHome sauf navigation complète
-- **SSE planning_notes** — toujours ignoré dans le listener SSE, géré localement
+- **SSE planning_notes** — toujours ignoré dans le listener, géré localement
 - **Feedbacks portail** — toujours via `inspection.feedback`, jamais `portalData.feedbacks`
+- **Scripts de patch** — toujours écrire dans un fichier `/tmp/fix_xxx.js` et executer avec `node`, jamais `node -e` avec du HTML imbriqué (backticks conflicts)
 
 ### Backend
 - **ESM uniquement** — `import/export`, pas de `require()`
 - **Pas de ALTER TABLE dans server.js** — user inspectflow n'est pas owner
-- **GRANT après CREATE TABLE** — toujours accorder permissions à l'user inspectflow
+- **GRANT après CREATE TABLE** — toujours accorder permissions à inspectflow
 - **broadcast()** après chaque POST/PATCH/DELETE
 
 ### Infra
 - **Volumes persistants** — ne jamais supprimer les bind mounts du docker-compose.yml
-- **Backup compose** — toujours `cp /root/docker-compose.yml /root/docker-compose.yml.save` avant modif
+- **Backup compose** — `cp /root/docker-compose.yml /root/docker-compose.yml.save` avant modif
 
 ### Git
-- Toujours commit sur `main` → CI/CD automatique
+- Toujours commit sur `main` → CI/CD automatique (~26s)
 - Format : `feat:`, `fix:`, `refactor:`, `chore:`
-- Après chaque modification : `git add -A && git commit -m "..." && git push origin main`
+- `git add -A && git commit -m "..." && git push origin main`
 
 ---
 
@@ -270,9 +275,9 @@ docker inspect root-inspectflow-1 | grep -A 3 Mounts
 # PostgreSQL superuser
 docker exec -it postgresql-nx6z-postgresql-1 psql -U DHRPc6BLGZptyhTV -d inspectflow
 
-# Accorder permissions nouvelles tables
+# Accorder permissions nouvelle table
 docker exec -it postgresql-nx6z-postgresql-1 psql -U DHRPc6BLGZptyhTV -d inspectflow -c \
-  "GRANT ALL PRIVILEGES ON TABLE NOM TO inspectflow; GRANT USAGE, SELECT ON SEQUENCE NOM_id_seq TO inspectflow;"
+  "GRANT ALL PRIVILEGES ON TABLE nom TO inspectflow; GRANT USAGE, SELECT ON SEQUENCE nom_id_seq TO inspectflow;"
 
 # Vérifier backups
 ls -lh /root/backups/
