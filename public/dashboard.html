@@ -2580,20 +2580,23 @@ async function renderPortalClientDetail(el, clientId) {
             <span class="status-dot status-${i.status||'draft'}" style="margin-left:8px">${statusLabel(i.status||'draft')}</span>
           </div>`).join('')}
 
-      <div class="section-divider">Feedbacks reçus (${portalData.feedbacks.length})</div>
-      ${portalData.feedbacks.length === 0
-        ? `<div style="padding:12px 0;font-size:13px;color:var(--text-3)">Aucun feedback.</div>`
-        : portalData.feedbacks.map(f => `
-          <div style="padding:10px 0;border-bottom:1px solid var(--border);font-size:13px">
-            <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
-              <span style="font-weight:500">${'⭐'.repeat(f.rating||0)}</span>
-              <span style="color:var(--text-3);font-size:11px">${f.updated_at ? new Date(f.updated_at).toLocaleDateString('fr-FR') : ''}</span>
-            </div>
-            ${f.comment ? `<div style="color:var(--text-2);font-style:italic">"${esc(f.comment)}"</div>` : ''}
-            <div style="color:var(--text-3);font-size:11px;margin-top:2px">
-              ${f.propre ? '✓ Propre ' : ''}${f.ponctuel ? '✓ Ponctuel ' : ''}${f.efficace ? '✓ Efficace' : ''}
-            </div>
-          </div>`).join('')}`;
+      <div class="section-divider">Feedbacks reçus (${portalData.inspections.filter(i=>i.feedback).length})</div>
+      ${portalData.inspections.filter(i=>i.feedback).length === 0
+        ? `<div style="padding:12px 0;font-size:13px;color:var(--text-3)">Aucun feedback reçu.</div>`
+        : portalData.inspections.filter(i=>i.feedback).map(i => {
+            const f = i.feedback;
+            return `<div style="padding:12px 0;border-bottom:1px solid var(--border);font-size:13px">
+              <div style="font-weight:500;color:var(--text-2);font-size:11px;margin-bottom:6px">${esc(i.notes||'Inspection')} · ${i.date ? fmtDate(i.date) : ''}</div>
+              <div style="display:flex;align-items:center;gap:10px;margin-bottom:4px">
+                <span style="font-weight:500">${'⭐'.repeat(Math.min(3,f.rating||0))}</span>
+                <span style="color:var(--text-3);font-size:11px">${f.updated_at ? new Date(f.updated_at).toLocaleDateString('fr-FR') : ''}</span>
+              </div>
+              ${f.comment ? `<div style="color:var(--text-2);font-style:italic;margin-bottom:4px">"${esc(f.comment)}"</div>` : ''}
+              <div style="color:var(--text-3);font-size:11px">
+                ${f.propre ? '⭐'.repeat(f.propre)+' Propreté ' : ''}${f.ponctuel ? '⭐'.repeat(f.ponctuel)+' Ponctualité ' : ''}${f.efficace ? '⭐'.repeat(f.efficace)+' Efficacité' : ''}
+              </div>
+            </div>`;
+          }).join('')}`;
     updateTopbarActions([]);
   } catch(e) {
     el.innerHTML = `<div style="padding:20px;color:var(--red)">${esc(e.message)}</div>`;
