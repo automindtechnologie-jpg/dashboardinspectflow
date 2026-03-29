@@ -548,6 +548,33 @@ input, textarea { font-family: inherit; }
   gap: 12px;
   flex-wrap: wrap;
 }
+@media (max-width: 768px) {
+  .inspect-header-bar {
+    flex-direction: column;
+    align-items: stretch;
+  }
+  .inspect-header-bar > div {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    width: 100%;
+  }
+  .inspect-header-bar .btn-sm {
+    flex: 1 1 auto;
+    justify-content: center;
+    min-width: 0;
+  }
+  .btn-submit-rapport {
+    width: 100%;
+    justify-content: center;
+  }
+  .progress-container {
+    width: 100%;
+  }
+  .progress-bar-wrap {
+    flex: 1;
+  }
+}
 .progress-container {
   display: flex;
   align-items: center;
