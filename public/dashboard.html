@@ -559,10 +559,12 @@ input, textarea { font-family: inherit; }
     gap: 8px;
     width: 100%;
   }
-  .inspect-header-bar .btn-sm {
-    flex: 1 1 auto;
+  .inspect-header-bar .btn-sm,
+  .inspect-header-bar .btn-edit-mode {
+    flex: 1 1 calc(50% - 4px);
     justify-content: center;
     min-width: 0;
+    text-align: center;
   }
   .btn-submit-rapport {
     width: 100%;
